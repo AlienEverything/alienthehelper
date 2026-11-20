@@ -42,13 +42,14 @@
   }
   function hero(s) {
     const habitat=M.item(s.equipped.habitat), buddy=M.item(s.equipped.companion), mode=s.draft.mode;
+    const credits=M.focusCredits(s.settings.focus);
     const modes=Object.entries(M.modes).map(([k,label])=>`<button class="${mode===k?"selected":""}" aria-pressed="${mode===k}" data-act="mode" data-value="${k}">${escape(label)}</button>`).join("");
     return `<section class="timer-hero" aria-label="Session timer" data-habitat="${habitat.id}">
       <img class="terrain" src="${art(habitat)}" alt="" fetchpriority="high"><div class="scene-shade"></div>
       ${OrbitFlightViews.landmark(E.survey(s,habitat.id).stage,"station-landmark")}<div class="hero-actor"><span></span><img src="${art(buddy)}" alt="${escape(buddy.name)}, your alien companion"></div>
       <div class="hero-controls"><div class="mode-pick" role="group" aria-label="Timer mode">${modes}</div>
       <div class="hero-time" aria-label="${s.settings[mode]} minutes">${clock(s.settings[mode]*60000)}</div>
-      <p class="hero-caption">${mode==="focus"?`${coin}<span><strong>${s.settings.focus} base credits</strong> on completion</span>`:`${icon("cup",17)}<span>Time to recharge</span>`}</p>
+      <p class="hero-caption">${mode==="focus"?`${coin}<span><strong>${credits} base credit${credits===1?"":"s"}</strong> on completion</span>`:`${icon("cup",17)}<span>Time to recharge</span>`}</p>
       <div class="hero-actions"><button type="button" class="primary" data-act="launch">${icon("play",17)}${mode==="focus"?"Start focus":"Start break"}</button>
       <button type="button" class="timer-adjust" data-act="settings" aria-label="Timer settings" title="Timer settings">${icon("sliders",19)}</button></div></div>
       <a href="#collection" class="location" aria-label="Change habitat, currently ${habitat.name}">${icon("pin",13)}${habitat.name}</a></section>`;

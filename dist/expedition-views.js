@@ -108,7 +108,7 @@
     const f=r.flight;
     const row=(label,n)=>`<div><dt>${esc(label)}</dt><dd>+${n}</dd></div>`;
     const earnedMissions=f?.missions.length?E.daily(s,f.day).cards.filter(c=>f.missions.includes(c.id)):[];
-    return `<dl class="payout">${row("Focus minutes",r.earned)}${f?.gearCredits?row(M.item(f.gear).name,f.gearCredits):""}${earnedMissions.map(c=>row(c.name,c.reward)).join("")}${f?.patch?row("Daily set bonus",E.patchCredits):""}</dl>`;
+    return `<dl class="payout">${row("Base focus credits",r.earned)}${f?.gearCredits?row(M.item(f.gear).name,f.gearCredits):""}${earnedMissions.map(c=>row(c.name,c.reward)).join("")}${f?.patch?row("Daily set bonus",E.patchCredits):""}</dl>`;
   }
   function result(s){
     const r=s.result,focus=r.mode==="focus",f=r.flight,next=s.sessions.length%4===0?"long":"short";

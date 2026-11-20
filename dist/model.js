@@ -38,10 +38,11 @@
   function left(a, now = Date.now()) {
     return Math.max(0, a.endsAt === null ? a.remainingMs : a.endsAt-now);
   }
+  const focusCredits = minutes => Math.floor(minutes / 3);
   function settle(s, now = Date.now()) {
     const a = s.active;
     if (!a || a.endsAt === null || now < a.endsAt) return false;
-    const earned = a.mode === "focus" ? a.minutes : 0;
+    const earned = a.mode === "focus" ? focusCredits(a.minutes) : 0;
     const record = {id:a.id,mode:a.mode,minutes:a.minutes,endedAt:a.endsAt,tagId:a.tagId,tagName:a.tagName,
       tagColor:a.tagColor,note:a.note,taskId:a.taskId,taskName:a.taskName,earned};
     if (a.mode === "focus" && !s.sessions.some(session => session.id === a.id)) {
@@ -105,7 +106,8 @@
     if (!s.tasks.every(t=>t && goodId(t.id) && textField(t.name,120) && t.name.trim() && hasTag(t.tagId) &&
       whole(t.target,1,30) && whole(t.count,0,Number.MAX_SAFE_INTEGER) && typeof t.done==="boolean") ||
       !unique(s.tasks)) throw Error("The tasks in this backup are invalid.");
-    if (!s.sessions.every(r=>r && goodId(r.id) && r.mode==="focus" && whole(r.minutes,1,180) && r.earned===r.minutes &&
+    if (!s.sessions.every(r=>r && goodId(r.id) && r.mode==="focus" && whole(r.minutes,1,180) &&
+      (r.earned===focusCredits(r.minutes) || r.earned===r.minutes) && // Previously, each minute earned one credit.
       whole(r.endedAt,0,8640000000000000) && goodId(r.tagId) && textField(r.tagName,32) && colorOK(r.tagColor) &&
       textField(r.note,500) && textField(r.taskName,120) && E.validFlight(r.flight,r.minutes)) || !unique(s.sessions))
       throw Error("The study log in this backup is invalid.");
@@ -150,5 +152,5 @@
     }
     return s;
   }
-  globalThis.OrbitModel = {key, colors, modes, items, item, id, limits, fresh, upgrade, dayKey, start, left, settle, togglePause, buy, equip, streak, validateBackup, validateLive};
+  globalThis.OrbitModel = {key, colors, modes, items, item, id, limits, fresh, upgrade, dayKey, start, left, focusCredits, settle, togglePause, buy, equip, streak, validateBackup, validateLive};
 })();
