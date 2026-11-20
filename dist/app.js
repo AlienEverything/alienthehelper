@@ -1,0 +1,345 @@
+(function orbitApp(){
+  "use strict";
+  const M=OrbitModel, V=OrbitViews, D=OrbitDialogs, E=OrbitExpedition, F=OrbitFlightViews;
+  const reducedMotion=window.matchMedia("(prefers-reduced-motion: reduce)");
+  const A=OrbitAccounts;
+  const app=document.querySelector("#app"), dialog=document.querySelector("#dialog"), notice=document.querySelector("#notice");
+  const defaults=()=>({taskFilter:"open",shopFilter:"all",collectionFilter:"all",logTag:"",logLimit:20,atlasWorld:null,atlasSheet:null});
+  let ui=defaults(), state=M.fresh(), noticeId, settling=false, retryAfter=0, pendingRestore=null, focusOrigin=null, renderedDay="";
+  const account=OrbitSession.create({notify:accountUpdated});
+  function accountUpdated(redraw){
+    if(account.phase==="ready")state=account.state;
+    else{
+      state=M.fresh();ui=defaults();pendingRestore=null;focusOrigin=null;retryAfter=0;
+      notice.hidden=true;clearTimeout(noticeId);
+      if(dialog.open)dialog.close();
+      dialog.replaceChildren();
+    }
+    if(redraw)render();else syncWarning();
+  }
+  function syncWarning(){
+    const existing=document.getElementById("cloud-warning");
+    if(!account.warning || account.phase!=="ready"){existing?.remove();return;}
+    if(existing)return;
+    const msg=document.createElement("div");
+    msg.id="cloud-warning";msg.className="cloud-warning";msg.setAttribute("role","status");
+    msg.innerHTML='<span>'+V.escape(account.warning)+'</span><button type="button" data-act="retry-sync">Retry sync</button>';
+    const header=app.querySelector(".page-head");
+    if(header)header.after(msg);else app.querySelector("main")?.append(msg);
+  }
+  const page=()=>Object.hasOwn(V.titles,location.hash.slice(1))?location.hash.slice(1):"station";
+  function pointTo(view){
+    if(page()===view)return;
+    history.replaceState(null,"","#"+view);
+    window.scrollTo(0,0);
+  }
+  function announce(msg){
+    if(state.active || account.phase!=="ready")return;
+    clearTimeout(noticeId);
+    notice.textContent=msg;notice.hidden=false;
+    noticeId=setTimeout(()=>{notice.hidden=true;},3200);
+  }
+  function render(){
+    if(account.phase!=="ready"){
+      app.dataset.layout="account";app.dataset.page="";
+      app.innerHTML=A.gate(account);
+      document.title=(account.signup?"Create an account":"Log in")+" · Orbit Outpost";
+      return;
+    }
+    const mode=state.active?"quiet":state.result?"result":"station";
+    const focused=document.activeElement;
+    const draftField=document.getElementById("session-note");
+    const keepFocus=app.contains(focused) && app.dataset.layout===mode && app.dataset.page===page();
+    if(app.dataset.layout!==mode && dialog.open)dialog.close();
+    const changedLayout=app.dataset.layout!==mode;
+    app.dataset.layout=mode;
+    app.dataset.page=page();
+    if(mode==="quiet"){
+      notice.hidden=true;app.innerHTML=F.focusRoom(state,reducedMotion.matches);updateClock();
+    }else if(mode==="result"){
+      app.innerHTML=F.result(state);document.title=(state.result.mode==="focus"?"Session complete":"Break complete")+" · Orbit Outpost";
+    }else{
+      app.innerHTML=V.frame(state,page(),ui);
+      const nextField=document.getElementById("session-note");
+      if(draftField && nextField){
+        if(draftField.value!==state.draft.note)draftField.value=state.draft.note;
+        nextField.replaceWith(draftField);
+      }
+      document.title=V.titles[page()]+" · Orbit Outpost";
+    }
+    syncWarning();
+    if(keepFocus){
+      const replacement=focused.id?document.getElementById(focused.id):[...app.querySelectorAll("[data-act]")].find(el=>el.dataset.act===focused.dataset.act && el.dataset.value===focused.dataset.value);
+      replacement?.focus({preventScroll:true});
+    }
+    if(changedLayout && mode!=="station"){window.scrollTo(0,0);app.querySelector("main")?.focus({preventScroll:true});}
+    renderedDay=M.dayKey();
+  }
+  const change=(fn,redraw=true)=>account.commit(fn,redraw);
+  function updateClock(){
+    const a=state.active;if(!a)return;
+    const ms=M.left(a), value=V.clock(ms);
+    const label=document.getElementById("live-clock"), progress=document.getElementById("live-progress");
+    if(label && label.textContent!==value)label.textContent=value;
+    if(progress){
+      const pct=Math.max(0,Math.min(100,(1-ms/(a.minutes*60000))*100));
+      progress.firstElementChild.style.width=pct+"%";progress.setAttribute("aria-valuenow",Math.floor(pct));
+    }
+    const title=`${value} · ${a.endsAt===null?"Paused":M.modes[a.mode]} · Orbit`;
+    if(document.title!==title)document.title=title;
+  }
+  async function tick(){
+    if(account.phase!=="ready")return;
+    if(state.active){
+      if(state.active.endsAt!==null && M.left(state.active)===0){
+        updateClock();
+        if(settling || Date.now()<retryAfter)return;
+        settling=true;
+        try{await change(()=>{});retryAfter=0;}
+        catch{retryAfter=Date.now()+15000;}
+        finally{settling=false;}
+      }else updateClock();
+    }else if(renderedDay!==M.dayKey())render();
+  }
+  function openDialog(html){
+    if(account.phase!=="ready")return;
+    if(!dialog.open){
+      const el=document.activeElement;
+      focusOrigin=el?.dataset?.act?{act:el.dataset.act,value:el.dataset.value}:null;
+    }
+    dialog.innerHTML=html;dialog.scrollTop=0;
+    if(!dialog.open)dialog.showModal();
+    const auto=dialog.querySelector("[autofocus]");if(auto)auto.focus();
+    else dialog.querySelector(".dialog-head button")?.focus();
+  }
+  function closeDialog(){if(dialog.open)dialog.close();}
+  function formError(msg){
+    const err=dialog.querySelector("#form-error");
+    if(err){err.textContent=msg;err.hidden=false;}else announce(msg);
+  }
+  function downloadBackup(){
+    const current=state, date=M.dayKey();
+    const url=URL.createObjectURL(new Blob([JSON.stringify({...current,active:null,result:null},null,2)],{type:"application/json"}));
+    const anchor=document.createElement("a");anchor.href=url;anchor.download=`orbit-outpost-${date}.json`;document.body.append(anchor);anchor.click();anchor.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),60000);announce("Backup exported.");
+  }
+  function finishAndReturn(s){
+    s.result=null;s.draft.mode="focus";pointTo("station");
+  }
+  async function act(action,value){
+    if(action==="sign-out"){await account.logout();return;}
+    if(account.phase!=="ready"){
+      if(action==="auth-continue")await account.login();
+      if(action==="auth-retry")await account.boot();
+      if(action==="claim-progress" || action==="start-fresh")await account.chooseLegacy(action==="claim-progress");
+      if(action==="auth-mode-login" || action==="auth-mode-signup"){
+        account.signup=action==="auth-mode-signup";account.message="";render();
+        app.querySelector("[data-act='auth-continue']")?.focus();
+      }
+      return;
+    }
+    if(action==="retry-sync"){await account.refresh(true);retryAfter=0;await tick();return;}
+    if(state.active && !["pause","room-motion","end-session","confirm-end","close-dialog"].includes(action))return;
+    switch(action){
+      case "close-dialog":closeDialog();return;
+      case "settings":openDialog(D.settings(state,account.who));return;
+      case "mode":await change(s=>{if(Object.hasOwn(M.modes,value))s.draft.mode=value;});return;
+      case "launch":await change(s=>M.start(s));return;
+      case "pause":{
+        const paused=state.active?.endsAt===null;
+        await change(s=>{if(s.active && (s.active.endsAt===null)===paused)M.togglePause(s);});return;
+      }
+      case "room-motion":
+        if(!reducedMotion.matches){const motion=!state.settings.motion;await change(s=>{if(s.active)s.settings.motion=motion;});}
+        return;
+      case "open-star":{
+        const record=state.sessions.find(r=>r.id===value);
+        if(!state.active && record)openDialog(F.starDetails(record));
+        return;
+      }
+      case "open-patch":
+        if(!state.active && state.sessions.some(r=>r.flight?.patch && r.flight.day===value))openDialog(F.patchDetails(state,value));
+        return;
+      case "view-result-star":{
+        const starId=await change(s=>{
+          if(!s.result || s.result.mode!=="focus")return null;
+          const record=s.sessions.find(r=>r.id===s.result.id);
+          if(!record)return null;
+          ui.atlasWorld=E.worldId(record);ui.atlasSheet=F.sheetFor(s,record);
+          s.result=null;s.draft.mode="focus";pointTo("atlas");
+          return record.id;
+        });
+        const record=state.sessions.find(r=>r.id===starId);
+        if(record)openDialog(F.starDetails(record));
+        return;
+      }
+      case "end-session":{
+        if(!state.active)return;
+        const focus=state.active.mode==="focus";
+        openDialog(D.confirm(focus?"End this session?":"End this break?",focus?"Only completed focus sessions earn credits. Your session setup will be ready if you want to start again.":"Return to your focus station now.", "confirm-end",focus?"End session":"End break",state.active.id,"Keep timer"));return;
+      }
+      case "confirm-end":
+        closeDialog();await change(s=>{if(s.active?.id===value){s.active=null;s.draft.mode="focus";pointTo("station");}});return;
+      case "back-station":await change(s=>{if(s.result)finishAndReturn(s);});return;
+      case "take-break":await change(s=>{if(s.result?.mode!=="focus")return;s.result=null;s.draft.mode=s.sessions.length%4===0?"long":"short";M.start(s);});return;
+      case "choose-tag":
+        await change(s=>{if(s.tags.some(t=>t.id===value))s.draft.tagId=value;});return;
+      case "new-tag":openDialog(D.tagEditor(state,null,value));return;
+      case "manage-tags":openDialog(D.manageTags(state));return;
+      case "edit-tag":{const t=state.tags.find(t=>t.id===value);if(t)openDialog(D.tagEditor(state,t,"manage"));return;}
+      case "delete-tag":{
+        const t=state.tags.find(t=>t.id===value);
+        if(!t || t.id==="general")return;
+        openDialog(D.confirm("Delete this tag?",`Tasks using “${t.name}” will move to ${V.tag(state,"general").name}. Past sessions keep their original tag.`,"confirm-delete-tag","Delete tag",value));return;
+      }
+      case "confirm-delete-tag":
+        await change(s=>{if(value==="general")return;s.tags=s.tags.filter(t=>t.id!==value);for(const t of s.tasks)if(t.tagId===value)t.tagId="general";if(s.draft.tagId===value)s.draft.tagId="general";});
+        openDialog(D.manageTags(state));return;
+      case "new-task":openDialog(D.taskEditor(state,null));return;
+      case "edit-task":{const t=state.tasks.find(t=>t.id===value);if(t)openDialog(D.taskEditor(state,t));return;}
+      case "quick-task":
+        await change(s=>{
+          const practice=value==="practice";
+          s.tasks.unshift({id:M.id(),name:practice?"Practice a problem set":"Review lecture notes",tagId:practice&&s.tags.some(t=>t.id==="math")?"math":s.draft.tagId,target:1,count:0,done:false});
+          ui.taskFilter="open";
+        });announce("Task added.");return;
+      case "task-filter":ui.taskFilter=value==="done"?"done":"open";render();return;
+      case "toggle-task":{
+        const desired=!state.tasks.find(t=>t.id===value)?.done;
+        await change(s=>{const t=s.tasks.find(t=>t.id===value);if(!t)return;t.done=desired;if(t.done && s.draft.taskId===value)s.draft.taskId=null;});return;
+      }
+      case "link-task":
+        await change(s=>{const t=s.tasks.find(t=>t.id===value && !t.done);if(!t)return;s.draft.taskId=t.id;s.draft.tagId=t.tagId;s.draft.mode="focus";pointTo("station");});announce("Task linked to your next session.");return;
+      case "unlink":await change(s=>{s.draft.taskId=null;});announce("Task unlinked.");return;
+      case "delete-task":{
+        const t=state.tasks.find(t=>t.id===value);if(t)openDialog(D.confirm("Delete this task?",`Remove “${t.name}” from your tasks? Completed sessions stay in your study log.`,"confirm-delete-task","Delete task",value));return;
+      }
+      case "confirm-delete-task":
+        closeDialog();await change(s=>{s.tasks=s.tasks.filter(t=>t.id!==value);if(s.draft.taskId===value)s.draft.taskId=null;});announce("Task deleted.");return;
+      case "edit-session":{const r=state.sessions.find(r=>r.id===value);if(r)openDialog(D.sessionEditor(state,r));return;}
+      case "more-history":ui.logLimit+=20;render();return;
+      case "shop-filter":ui.shopFilter=value;render();return;
+      case "collection-filter":ui.collectionFilter=value;render();return;
+      case "buy-item":{const p=M.item(value);if(p && !state.owned.includes(value))openDialog(D.purchase(state,p));return;}
+      case "confirm-buy":{
+        const success=await change(s=>{if(!M.buy(s,value))return false;M.equip(s,value);return true;});
+        closeDialog();announce(success?`${M.item(value).name} unlocked and equipped.`:"Your balance or collection has changed.");return;
+      }
+      case "unequip-gear":await change(s=>{s.equipped.gear=null;});announce("Field gear unequipped.");return;
+      case "equip":await change(s=>M.equip(s,value));announce(`${M.item(value).name} equipped.`);return;
+      case "export":downloadBackup();return;
+      case "import":dialog.querySelector("#import-file")?.click();return;
+      case "confirm-restore":{
+        if(!pendingRestore)return;
+        const backup=pendingRestore;pendingRestore=null;closeDialog();
+        ui.logTag="";ui.taskFilter="open";ui.logLimit=20;ui.atlasWorld=null;ui.atlasSheet=null;
+        await change(s=>{Object.assign(s,backup);pointTo("station");});announce("Backup restored.");return;
+      }
+    }
+  }
+  document.addEventListener("click",event=>{
+    const el=event.target.closest("[data-act]");
+    if(el && !el.disabled){
+      if(el.hasAttribute("aria-busy"))return;
+      el.setAttribute("aria-busy","true");
+      act(el.dataset.act,el.dataset.value||"").catch(error=>formError(error.message)).finally(()=>el.removeAttribute("aria-busy"));
+      return;
+    }
+    if(event.target.closest(".skip-link")){event.preventDefault();app.querySelector("main")?.focus();return;}
+    if(event.target===dialog){
+      const b=dialog.getBoundingClientRect();if(event.clientX<b.left || event.clientX>b.right || event.clientY<b.top || event.clientY>b.bottom)closeDialog();
+    }
+  });
+  dialog.addEventListener("close",()=>{
+    pendingRestore=null;
+    if(!focusOrigin || dialog.open)return;
+    const origin=[...app.querySelectorAll("[data-act]")].find(el=>el.dataset.act===focusOrigin.act && el.dataset.value===focusOrigin.value);
+    if(origin)origin.focus({preventScroll:true});
+  });
+  document.addEventListener("input",event=>{
+    if(event.target.id==="session-note")account.note(event.target.value);
+  });
+  document.addEventListener("change",async event=>{
+    if(account.phase!=="ready")return;
+    const owner=account.who;
+    if(event.target.id==="atlas-world"){ui.atlasWorld=event.target.value;ui.atlasSheet=null;render();return;}
+    if(event.target.id==="atlas-sheet"){ui.atlasSheet=Number(event.target.value);render();return;}
+    if(event.target.id==="log-filter"){ui.logTag=event.target.value;ui.logLimit=20;render();return;}
+    if(event.target.id!=="import-file")return;
+    const file=event.target.files[0];if(!file)return;
+    try{
+      if(file.size>16000000)throw Error("Choose an Orbit backup smaller than 16 MB.");
+      let json;try{json=JSON.parse(await file.text());}catch{throw Error("Choose a valid Orbit Outpost JSON backup.");}
+      if(account.phase!=="ready" || account.who!==owner)return;
+      pendingRestore=M.validateBackup(json);
+      openDialog(D.confirm("Restore this backup?",`Replace the progress in your account with ${pendingRestore.sessions.length} saved focus sessions and ${pendingRestore.credits} credits?`,"confirm-restore","Restore backup"));
+    }catch(e){pendingRestore=null;formError(e.message);event.target.value="";}
+  });
+  async function saveForm(form){
+    if(account.phase!=="ready" || state.active)return;
+    const fields=new FormData(form), val=k=>String(fields.get(k)||""), name=val("name").trim();
+    if(form.dataset.form==="settings"){
+      const settings=Object.fromEntries(Object.keys(M.limits).map(k=>[k,Number(val(k))]));
+      if(Object.entries(settings).some(([k,v])=>!Number.isInteger(v)||v<1||v>M.limits[k]))throw Error("Use a whole number within each field’s range.");
+      await change(s=>{Object.assign(s.settings,settings,{motion:val("motion")==="on"});});closeDialog();announce("Settings saved.");return;
+    }
+    if(form.dataset.form==="tag"){
+      if(!name)throw Error("Give this subject a name.");
+      const selectedColor=val("color"), tagId=val("id"), manage=val("back")==="manage";
+      await change(s=>{
+        if(s.tags.some(t=>t.id!==tagId && t.name.toLocaleLowerCase()===name.toLocaleLowerCase()))throw Error("A tag with that name already exists.");
+        const existing=tagId?s.tags.find(t=>t.id===tagId):null;
+        if(tagId && !existing)throw Error("This tag was removed in another tab.");
+        const t=existing||{id:M.id()};t.name=name;t.color=Object.hasOwn(M.colors,selectedColor)?selectedColor:"sage";
+        if(!existing)s.tags.push(t);
+        if(!manage)s.draft.tagId=t.id;
+      });
+      if(manage)openDialog(D.manageTags(state));else closeDialog();announce(tagId?"Tag updated.":"Subject tag created.");return;
+    }
+    if(form.dataset.form==="task"){
+      if(!name)throw Error("Give this task a name.");
+      const taskId=val("id"), target=Number(val("target"));
+      if(!Number.isInteger(target)||target<1||target>30)throw Error("Choose a target from 1 to 30 sessions.");
+      await change(s=>{
+        const existing=taskId?s.tasks.find(t=>t.id===taskId):null;
+        if(taskId && !existing)throw Error("This task was removed in another tab.");
+        const t=existing||{id:M.id(),count:0,done:false};
+        t.name=name;t.tagId=V.tag(s,val("tagId")).id;t.target=target;
+        if(existing && t.count>=target)t.done=true;
+        if(!existing){s.tasks.unshift(t);ui.taskFilter="open";}
+        if(s.draft.taskId===t.id){if(t.done)s.draft.taskId=null;else s.draft.tagId=t.tagId;}
+      });
+      closeDialog();announce(taskId?"Task updated.":"Task added.");return;
+    }
+    if(form.dataset.form==="session"){
+      await change(s=>{
+        const r=s.sessions.find(r=>r.id===val("id"));if(!r)return;
+        const t=s.tags.find(t=>t.id===val("tagId"));if(t){r.tagId=t.id;r.tagName=t.name;r.tagColor=t.color;}
+        r.note=val("note").slice(0,500).trim();
+      });closeDialog();announce("Session updated.");
+    }
+  }
+  dialog.addEventListener("submit",event=>{
+    event.preventDefault();
+    const form=event.target,submit=form.querySelector('[type="submit"]');
+    if(!submit || submit.disabled)return;
+    submit.disabled=true;
+    saveForm(form).catch(error=>formError(error.message)).finally(()=>{submit.disabled=false;});
+  });
+  window.addEventListener("hashchange",()=>{if(dialog.open)closeDialog();render();window.scrollTo(0,0);});
+  window.addEventListener("storage",event=>{
+    if(event.key===account.signalKey && event.newValue){location.reload();return;}
+  });
+  function wake(){
+    if(account.phase==="ready")account.refresh(true).then(tick);
+    else if(account.phase==="sdk-error" || account.phase==="cloud-error")account.boot();
+  }
+  document.addEventListener("visibilitychange",()=>{if(!document.hidden)wake();});
+  window.addEventListener("online",wake);
+  window.addEventListener("pageshow",event=>{if(event.persisted)account.boot();else tick();});
+  window.addEventListener("pagehide",()=>{if(account.phase==="ready" && document.activeElement?.id==="session-note")change(undefined,false).catch(()=>{});});
+  reducedMotion.addEventListener("change",()=>{if(state.active)render();});
+  account.boot();
+  setInterval(tick,400);
+  setInterval(()=>{if(!document.hidden)account.refresh().then(tick);},20000);
+})();
