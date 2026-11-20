@@ -25,13 +25,13 @@
     const active=value.active?{...value.active,loadout:E.loadout({equipped})}:null;
     return {...value,version:2,equipped,active,settings:{...value.settings,motion:true}};
   }
-  function start(s, now = Date.now()) {
+  function start(s, now = Date.now(), sessionId = id()) {
     if (s.active || s.result) return;
     const mode = s.draft.mode;
     const tag = s.tags.find(t => t.id === s.draft.tagId) || s.tags[0];
     const task = mode === "focus" && s.tasks.find(t => t.id === s.draft.taskId && !t.done);
     const minutes = s.settings[mode];
-    s.active = {id:id(),mode,minutes,loadout:E.loadout(s),startedAt:now,endsAt:now+minutes*60000,remainingMs:minutes*60000,
+    s.active = {id:sessionId,mode,minutes,loadout:E.loadout(s),startedAt:now,endsAt:now+minutes*60000,remainingMs:minutes*60000,
       tagId:tag.id,tagName:tag.name,tagColor:tag.color,note:mode === "focus" ? s.draft.note.trim() : "",
       taskId:task?.id || null,taskName:task?.name || ""};
   }
@@ -111,11 +111,20 @@
       throw Error("The study log in this backup is invalid.");
     if (!Object.hasOwn(modes,s.draft.mode) || !hasTag(s.draft.tagId) || !textField(s.draft.note,500) ||
       !(s.draft.taskId===null || s.tasks.some(t=>t.id===s.draft.taskId))) throw Error("The session setup in this backup is invalid.");
-    return {...s, active:null, result:null};
+    const backup={...s,active:null,result:null};
+    delete backup.syncCursors;
+    return backup;
   }
   function validateLive(input){
     const raw=upgrade(input);
     const s=validateBackup(raw);
+    if(raw.syncCursors!==undefined){
+      const cursors=raw.syncCursors;
+      if(!cursors || typeof cursors!=="object" || Array.isArray(cursors) ||
+        !Object.entries(cursors).every(([key,value])=>goodId(key) && !Object.hasOwn(Object.prototype,key) && whole(value,1,Number.MAX_SAFE_INTEGER)))
+        throw Error("The cloud save’s synchronization history could not be verified.");
+      s.syncCursors=cursors;
+    }
     const a=raw.active, r=raw.result;
     const stamp=n=>whole(n,0,8640000000000000);
     const fieldsOK=x=>goodId(x.id) && Object.hasOwn(modes,x.mode) && whole(x.minutes,1,limits[x.mode]) &&
