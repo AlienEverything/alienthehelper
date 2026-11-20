@@ -1,10 +1,10 @@
 const test=require("node:test"),assert=require("node:assert/strict");
-for(const file of ["expedition","model","icons","views","accounts","cloud","session"])require("../dist/"+file+".js");
+for(const file of ["expedition","model","icons","views","accounts","cloud","commands","session"])require("../dist/"+file+".js");
 const M=globalThis.OrbitModel,C=globalThis.OrbitCloud,A=globalThis.OrbitAccounts;
 const later=()=>new Promise(resolve=>setImmediate(resolve));
 function deviceStorage(){
   const data=new Map();
-  return {get:k=>data.get(k)??null,set:(k,v)=>data.set(k,v),remove:k=>data.delete(k)};
+  return {get:k=>data.get(k)??null,set:(k,v)=>data.set(k,v),remove:k=>data.delete(k),keys:()=>[...data.keys()]};
 }
 function provider(){
   const folders=new Map();
@@ -124,4 +124,51 @@ test("a previous identity cannot paint or write after sign-out during an in-flig
   const get=d.api.auth.getUser;d.api.auth.getUser=async()=>{const old=await get();await wait;return old;};
   const starting=a.boot();while(a.phase!=="loading-save")await later();await later();await later();
   await a.logout();release();await starting;assert.equal(a.state,null);assert.equal(a.phase,"signed-out");assert.equal(cloud.folders.size,0);
+});
+test("rapid local choices and dependent edits render before the first cloud request completes",async()=>{
+  const d=provider().device("pilot-a"),a=d.screen();await a.boot();
+  let resume;const gate=new Promise(r=>{resume=r;});
+  const read=d.api.fs.readdir;d.api.fs.readdir=async p=>{await gate;return read(p);};
+  a.dispatch("mode",{mode:"short"});assert.equal(a.state.draft.mode,"short");
+  const first=a.flush();
+  a.dispatch("mode",{mode:"focus"});
+  a.dispatch("task",{id:"work",name:"Read chapter",tagId:"math",target:2});
+  a.dispatch("link-task",{id:"work"});a.dispatch("launch",{note:"Chapter 3"});
+  const timer=a.state.active.id;
+  a.dispatch("pause",{paused:true});
+  assert.equal(a.state.active.endsAt,null);assert.equal(a.state.active.taskId,"work");
+  resume();await first;
+  const b=d.screen();await b.boot();
+  assert.equal(b.state.active.id,timer);assert.equal(b.state.active.endsAt,null);
+  assert.equal(b.state.active.note,"Chapter 3");assert.equal(b.state.tasks.length,1);
+});
+test("offline changes survive reload, reconcile once, and preserve independent edits from another device",async()=>{
+  const cloud=provider(),d=cloud.device("pilot-a"),a=d.screen();await a.boot();
+  d.api.offline=true;a.dispatch("task",{id:"homework",name:"Read",tagId:"math",target:1});
+  await assert.rejects(a.flush());assert.match(a.warning,/sync paused/);
+  const b=cloud.device("pilot-a").screen();await b.boot();b.dispatch("mode",{mode:"long"});await b.flush();
+  d.api.offline=false;const c=d.screen();await c.boot();
+  assert.equal(c.state.tasks[0].id,"homework");assert.equal(c.state.draft.mode,"long");
+  await Promise.all([a.flush(),c.flush()]);await b.refresh();
+  assert.equal(b.state.tasks.length,1);assert.equal(b.state.draft.mode,"long");
+  assert.equal(d.storage.keys().some(key=>key.includes(".change.")),false);
+});
+test("competing purchases reconcile to the affordable balance and queued edits stay with their account",async()=>{
+  const cloud=provider(),d=cloud.device("pilot-a"),a=d.screen(),b=cloud.device("pilot-a").screen();
+  await a.boot();await a.commit(s=>{s.credits=50;});await b.boot();
+  a.dispatch("buy",{id:"wisp"});b.dispatch("buy",{id:"scanner"});
+  await a.flush();await b.flush();assert.match(b.warning,/balance/);
+  assert.deepEqual(b.state.owned,["pip","lunar","wisp"]);assert.equal(b.state.credits,25);
+  d.api.offline=true;a.dispatch("mode",{mode:"long"});await a.logout();
+  d.api.offline=false;d.api.next="pilot-b";await a.login();
+  assert.equal(a.state.draft.mode,"focus");assert.equal(a.state.credits,0);
+});
+test("two offline completions for the same timer award one session without a conflict warning",async()=>{
+  const cloud=provider(),d=cloud.device("pilot-a"),a=d.screen(),b=cloud.device("pilot-a").screen();
+  await a.boot();await a.commit(s=>M.start(s,1000));await b.boot();
+  a.dispatch("settle");b.dispatch("settle");
+  assert.equal(a.state.sessions.length,1);assert.equal(b.state.sessions.length,1);
+  await Promise.all([a.flush(),b.flush()]);await a.refresh();await b.refresh();
+  assert.equal(a.state.credits,b.state.credits);assert.equal(b.state.sessions.length,1);
+  assert.equal(a.warning,"");assert.equal(b.warning,"");
 });

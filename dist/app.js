@@ -20,7 +20,7 @@
   function syncWarning(){
     const existing=document.getElementById("cloud-warning");
     if(!account.warning || account.phase!=="ready"){existing?.remove();return;}
-    if(existing)return;
+    if(existing){existing.querySelector("span").textContent=account.warning;return;}
     const msg=document.createElement("div");
     msg.id="cloud-warning";msg.className="cloud-warning";msg.setAttribute("role","status");
     msg.innerHTML='<span>'+V.escape(account.warning)+'</span><button type="button" data-act="retry-sync">Retry sync</button>';
@@ -75,7 +75,7 @@
     if(changedLayout && mode!=="station"){window.scrollTo(0,0);app.querySelector("main")?.focus({preventScroll:true});}
     renderedDay=M.dayKey();
   }
-  const change=(fn,redraw=true)=>account.commit(fn,redraw);
+  const change=(type,data)=>account.dispatch(type,data);
   function updateClock(){
     const a=state.active;if(!a)return;
     const ms=M.left(a), value=V.clock(ms);
@@ -95,7 +95,7 @@
         updateClock();
         if(settling || Date.now()<retryAfter)return;
         settling=true;
-        try{await change(()=>{});retryAfter=0;}
+        try{await change("settle");retryAfter=0;}
         catch{retryAfter=Date.now()+15000;}
         finally{settling=false;}
       }else updateClock();
@@ -119,12 +119,9 @@
   }
   function downloadBackup(){
     const current=state, date=M.dayKey();
-    const url=URL.createObjectURL(new Blob([JSON.stringify({...current,active:null,result:null},null,2)],{type:"application/json"}));
+    const url=URL.createObjectURL(new Blob([JSON.stringify({...current,syncCursors:undefined,active:null,result:null},null,2)],{type:"application/json"}));
     const anchor=document.createElement("a");anchor.href=url;anchor.download=`orbit-outpost-${date}.json`;document.body.append(anchor);anchor.click();anchor.remove();
     setTimeout(()=>URL.revokeObjectURL(url),60000);announce("Backup exported.");
-  }
-  function finishAndReturn(s){
-    s.result=null;s.draft.mode="focus";pointTo("station");
   }
   async function act(action,value){
     if(action==="sign-out"){await account.logout();return;}
@@ -143,14 +140,11 @@
     switch(action){
       case "close-dialog":closeDialog();return;
       case "settings":openDialog(D.settings(state,account.who));return;
-      case "mode":await change(s=>{if(Object.hasOwn(M.modes,value))s.draft.mode=value;});return;
-      case "launch":await change(s=>M.start(s));return;
-      case "pause":{
-        const paused=state.active?.endsAt===null;
-        await change(s=>{if(s.active && (s.active.endsAt===null)===paused)M.togglePause(s);});return;
-      }
+      case "mode":await change("mode",{mode:value});return;
+      case "launch":await change("launch",{note:state.draft.note});return;
+      case "pause":await change("pause",{paused:state.active?.endsAt!==null});return;
       case "room-motion":
-        if(!reducedMotion.matches){const motion=!state.settings.motion;await change(s=>{if(s.active)s.settings.motion=motion;});}
+        if(!reducedMotion.matches)await change("motion",{enabled:!state.settings.motion});
         return;
       case "open-star":{
         const record=state.sessions.find(r=>r.id===value);
@@ -161,15 +155,11 @@
         if(!state.active && state.sessions.some(r=>r.flight?.patch && r.flight.day===value))openDialog(F.patchDetails(state,value));
         return;
       case "view-result-star":{
-        const starId=await change(s=>{
-          if(!s.result || s.result.mode!=="focus")return null;
-          const record=s.sessions.find(r=>r.id===s.result.id);
-          if(!record)return null;
-          ui.atlasWorld=E.worldId(record);ui.atlasSheet=F.sheetFor(s,record);
-          s.result=null;s.draft.mode="focus";pointTo("atlas");
-          return record.id;
-        });
-        const record=state.sessions.find(r=>r.id===starId);
+        const record=state.sessions.find(r=>r.id===state.result?.id);
+        if(record){
+          ui.atlasWorld=E.worldId(record);ui.atlasSheet=F.sheetFor(state,record);
+          pointTo("atlas");await change("back");
+        }
         if(record)openDialog(F.starDetails(record));
         return;
       }
@@ -179,11 +169,10 @@
         openDialog(D.confirm(focus?"End this session?":"End this break?",focus?"Only completed focus sessions earn credits. Your session setup will be ready if you want to start again.":"Return to your focus station now.", "confirm-end",focus?"End session":"End break",state.active.id,"Keep timer"));return;
       }
       case "confirm-end":
-        closeDialog();await change(s=>{if(s.active?.id===value){s.active=null;s.draft.mode="focus";pointTo("station");}});return;
-      case "back-station":await change(s=>{if(s.result)finishAndReturn(s);});return;
-      case "take-break":await change(s=>{if(s.result?.mode!=="focus")return;s.result=null;s.draft.mode=s.sessions.length%4===0?"long":"short";M.start(s);});return;
-      case "choose-tag":
-        await change(s=>{if(s.tags.some(t=>t.id===value))s.draft.tagId=value;});return;
+        closeDialog();if(state.active?.id===value){pointTo("station");await change("end");}return;
+      case "back-station":if(state.result){pointTo("station");await change("back");}return;
+      case "take-break":await change("break");return;
+      case "choose-tag":await change("choose-tag",{id:value});return;
       case "new-tag":openDialog(D.tagEditor(state,null,value));return;
       case "manage-tags":openDialog(D.manageTags(state));return;
       case "edit-tag":{const t=state.tags.find(t=>t.id===value);if(t)openDialog(D.tagEditor(state,t,"manage"));return;}
@@ -193,47 +182,46 @@
         openDialog(D.confirm("Delete this tag?",`Tasks using “${t.name}” will move to ${V.tag(state,"general").name}. Past sessions keep their original tag.`,"confirm-delete-tag","Delete tag",value));return;
       }
       case "confirm-delete-tag":
-        await change(s=>{if(value==="general")return;s.tags=s.tags.filter(t=>t.id!==value);for(const t of s.tasks)if(t.tagId===value)t.tagId="general";if(s.draft.tagId===value)s.draft.tagId="general";});
+        await change("delete-tag",{id:value});
         openDialog(D.manageTags(state));return;
       case "new-task":openDialog(D.taskEditor(state,null));return;
       case "edit-task":{const t=state.tasks.find(t=>t.id===value);if(t)openDialog(D.taskEditor(state,t));return;}
-      case "quick-task":
-        await change(s=>{
-          const practice=value==="practice";
-          s.tasks.unshift({id:M.id(),name:practice?"Practice a problem set":"Review lecture notes",tagId:practice&&s.tags.some(t=>t.id==="math")?"math":s.draft.tagId,target:1,count:0,done:false});
-          ui.taskFilter="open";
-        });announce("Task added.");return;
+      case "quick-task":{
+        const practice=value==="practice";ui.taskFilter="open";
+        await change("task",{id:M.id(),name:practice?"Practice a problem set":"Review lecture notes",
+          tagId:practice && state.tags.some(t=>t.id==="math")?"math":state.draft.tagId,target:1});
+        announce("Task added.");return;
+      }
       case "task-filter":ui.taskFilter=value==="done"?"done":"open";render();return;
       case "toggle-task":{
         const desired=!state.tasks.find(t=>t.id===value)?.done;
-        await change(s=>{const t=s.tasks.find(t=>t.id===value);if(!t)return;t.done=desired;if(t.done && s.draft.taskId===value)s.draft.taskId=null;});return;
+        await change("toggle-task",{id:value,done:desired});return;
       }
       case "link-task":
-        await change(s=>{const t=s.tasks.find(t=>t.id===value && !t.done);if(!t)return;s.draft.taskId=t.id;s.draft.tagId=t.tagId;s.draft.mode="focus";pointTo("station");});announce("Task linked to your next session.");return;
-      case "unlink":await change(s=>{s.draft.taskId=null;});announce("Task unlinked.");return;
+        pointTo("station");await change("link-task",{id:value});announce("Task linked to your next session.");return;
+      case "unlink":await change("unlink");announce("Task unlinked.");return;
       case "delete-task":{
         const t=state.tasks.find(t=>t.id===value);if(t)openDialog(D.confirm("Delete this task?",`Remove “${t.name}” from your tasks? Completed sessions stay in your study log.`,"confirm-delete-task","Delete task",value));return;
       }
       case "confirm-delete-task":
-        closeDialog();await change(s=>{s.tasks=s.tasks.filter(t=>t.id!==value);if(s.draft.taskId===value)s.draft.taskId=null;});announce("Task deleted.");return;
+        closeDialog();await change("delete-task",{id:value});announce("Task deleted.");return;
       case "edit-session":{const r=state.sessions.find(r=>r.id===value);if(r)openDialog(D.sessionEditor(state,r));return;}
       case "more-history":ui.logLimit+=20;render();return;
       case "shop-filter":ui.shopFilter=value;render();return;
       case "collection-filter":ui.collectionFilter=value;render();return;
       case "buy-item":{const p=M.item(value);if(p && !state.owned.includes(value))openDialog(D.purchase(state,p));return;}
       case "confirm-buy":{
-        const success=await change(s=>{if(!M.buy(s,value))return false;M.equip(s,value);return true;});
-        closeDialog();announce(success?`${M.item(value).name} unlocked and equipped.`:"Your balance or collection has changed.");return;
+        await change("buy",{id:value});closeDialog();announce(`${M.item(value).name} unlocked and equipped.`);return;
       }
-      case "unequip-gear":await change(s=>{s.equipped.gear=null;});announce("Field gear unequipped.");return;
-      case "equip":await change(s=>M.equip(s,value));announce(`${M.item(value).name} equipped.`);return;
+      case "unequip-gear":await change("unequip");announce("Field gear unequipped.");return;
+      case "equip":await change("equip",{id:value});announce(`${M.item(value).name} equipped.`);return;
       case "export":downloadBackup();return;
       case "import":dialog.querySelector("#import-file")?.click();return;
       case "confirm-restore":{
         if(!pendingRestore)return;
         const backup=pendingRestore;pendingRestore=null;closeDialog();
         ui.logTag="";ui.taskFilter="open";ui.logLimit=20;ui.atlasWorld=null;ui.atlasSheet=null;
-        await change(s=>{Object.assign(s,backup);pointTo("station");});announce("Backup restored.");return;
+        pointTo("station");await change("restore",{backup});announce("Backup restored.");return;
       }
     }
   }
@@ -281,42 +269,24 @@
     if(form.dataset.form==="settings"){
       const settings=Object.fromEntries(Object.keys(M.limits).map(k=>[k,Number(val(k))]));
       if(Object.entries(settings).some(([k,v])=>!Number.isInteger(v)||v<1||v>M.limits[k]))throw Error("Use a whole number within each field’s range.");
-      await change(s=>{Object.assign(s.settings,settings,{motion:val("motion")==="on"});});closeDialog();announce("Settings saved.");return;
+      await change("settings",{...settings,motion:val("motion")==="on"});closeDialog();announce("Settings saved.");return;
     }
     if(form.dataset.form==="tag"){
       if(!name)throw Error("Give this subject a name.");
       const selectedColor=val("color"), tagId=val("id"), manage=val("back")==="manage";
-      await change(s=>{
-        if(s.tags.some(t=>t.id!==tagId && t.name.toLocaleLowerCase()===name.toLocaleLowerCase()))throw Error("A tag with that name already exists.");
-        const existing=tagId?s.tags.find(t=>t.id===tagId):null;
-        if(tagId && !existing)throw Error("This tag was removed in another tab.");
-        const t=existing||{id:M.id()};t.name=name;t.color=Object.hasOwn(M.colors,selectedColor)?selectedColor:"sage";
-        if(!existing)s.tags.push(t);
-        if(!manage)s.draft.tagId=t.id;
-      });
+      await change("tag",{id:tagId||M.id(),edit:!!tagId,name,color:Object.hasOwn(M.colors,selectedColor)?selectedColor:"sage",select:!manage});
       if(manage)openDialog(D.manageTags(state));else closeDialog();announce(tagId?"Tag updated.":"Subject tag created.");return;
     }
     if(form.dataset.form==="task"){
       if(!name)throw Error("Give this task a name.");
       const taskId=val("id"), target=Number(val("target"));
       if(!Number.isInteger(target)||target<1||target>30)throw Error("Choose a target from 1 to 30 sessions.");
-      await change(s=>{
-        const existing=taskId?s.tasks.find(t=>t.id===taskId):null;
-        if(taskId && !existing)throw Error("This task was removed in another tab.");
-        const t=existing||{id:M.id(),count:0,done:false};
-        t.name=name;t.tagId=V.tag(s,val("tagId")).id;t.target=target;
-        if(existing && t.count>=target)t.done=true;
-        if(!existing){s.tasks.unshift(t);ui.taskFilter="open";}
-        if(s.draft.taskId===t.id){if(t.done)s.draft.taskId=null;else s.draft.tagId=t.tagId;}
-      });
+      if(!taskId)ui.taskFilter="open";
+      await change("task",{id:taskId||M.id(),edit:!!taskId,name,tagId:val("tagId"),target});
       closeDialog();announce(taskId?"Task updated.":"Task added.");return;
     }
     if(form.dataset.form==="session"){
-      await change(s=>{
-        const r=s.sessions.find(r=>r.id===val("id"));if(!r)return;
-        const t=s.tags.find(t=>t.id===val("tagId"));if(t){r.tagId=t.id;r.tagName=t.name;r.tagColor=t.color;}
-        r.note=val("note").slice(0,500).trim();
-      });closeDialog();announce("Session updated.");
+      await change("edit-session",{id:val("id"),tagId:val("tagId"),note:val("note").slice(0,500).trim()});closeDialog();announce("Session updated.");
     }
   }
   dialog.addEventListener("submit",event=>{
@@ -337,7 +307,7 @@
   document.addEventListener("visibilitychange",()=>{if(!document.hidden)wake();});
   window.addEventListener("online",wake);
   window.addEventListener("pageshow",event=>{if(event.persisted)account.boot();else tick();});
-  window.addEventListener("pagehide",()=>{if(account.phase==="ready" && document.activeElement?.id==="session-note")change(undefined,false).catch(()=>{});});
+  window.addEventListener("pagehide",()=>{if(account.phase==="ready" && document.activeElement?.id==="session-note")account.commit(undefined,false).catch(()=>{});});
   reducedMotion.addEventListener("change",()=>{if(state.active)render();});
   account.boot();
   setInterval(tick,400);

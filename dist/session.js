@@ -6,16 +6,21 @@
   const defaultStorage={
     get(key){try{return globalThis.localStorage.getItem(key);}catch{return null;}},
     set(key,value){try{globalThis.localStorage.setItem(key,value);return true;}catch{return false;}},
+    keys(){try{return Object.keys(globalThis.localStorage);}catch{return [];}},
     remove(key){try{globalThis.localStorage.removeItem(key);}catch{}}
   };
   function create({notify=()=>{},loadSdk=A.sdk,storage=defaultStorage}={}){
     const account={phase:"connecting",message:"",signup:false,who:null,legacy:null,state:null,warning:"",revision:0};
     let api=null,store=null,epoch=0,authToken=null,draft=null,noteTimer,pulling=false,pendingWrites=0;
+    let pending=[],writer=M.id(),sequence=0,flushJob=null,flushTimer;
+    const outboxPrefix=()=>M.key+".account."+account.who.uuid+".change.";
+    const opKey=op=>outboxPrefix()+op.writer+"."+op.seq;
+    const acknowledged=(s,op)=>(s.syncCursors?.[op.writer]||0)>=op.seq;
     const noteKey=()=>M.key+".account."+account.who.uuid+".note";
     const current=g=>g===epoch;
     const stillSigned=()=>!!api?.auth.isSignedIn() && (!authToken || api.authToken===authToken);
     function reset(phase,message=""){
-      epoch++;clearTimeout(noteTimer);store=null;draft=null;authToken=null;pulling=false;pendingWrites=0;
+      epoch++;clearTimeout(flushTimer);flushTimer=null;pending=[];flushJob=null;writer=M.id();sequence=0;clearTimeout(noteTimer);store=null;draft=null;authToken=null;pulling=false;pendingWrites=0;
       Object.assign(account,{phase,message,who:null,legacy:null,state:null,warning:"",revision:0});
       notify(true);
     }
@@ -32,9 +37,18 @@
     function accept(remote,redraw=true){
       if(remote.revision<account.revision)return;
       account.revision=remote.revision;
-      account.state=remote.state;
-      if(canApply(draft,account.state))account.state.draft.note=draft.note;
-      account.warning="";notify(redraw);
+      const confirmed=remote.state;
+      const projected=structuredClone(confirmed);
+      delete projected.syncCursors;
+      pending=pending.filter(op=>{
+        if(acknowledged(confirmed,op)){storage.remove(opKey(op));return false;}
+        // A competing device can invalidate an intent. The writer records the decision on flush.
+        try{OrbitCommands.apply(projected,op);}catch{}
+        return true;
+      });
+      if(canApply(draft,projected))projected.draft.note=draft.note;
+      const changed=redraw || JSON.stringify(projected)!==JSON.stringify(account.state);
+      account.state=projected;account.warning="";notify(changed);
     }
     function loadLegacy(){
       if(storage.get(claimKey))return null;
@@ -48,7 +62,15 @@
     }
     function opened(remote){
       account.phase="ready";account.message="";account.legacy=null;
+      const prefix=outboxPrefix();
+      pending=(storage.keys?.()||[]).filter(k=>k.startsWith(prefix)).flatMap(k=>{
+        try{
+          const op=JSON.parse(storage.get(k));
+          return typeof op.writer==="string" && /^[a-zA-Z0-9_-]{1,80}$/.test(op.writer) && Number.isSafeInteger(op.seq) && op.seq>0 && opKey(op)===k?[op]:[];
+        }catch{return [];}
+      }).sort((a,b)=>a.order-b.order || a.writer.localeCompare(b.writer) || a.seq-b.seq);
       draft=readDraft();accept(remote);
+      if(pending.length)scheduleFlush();
       if(draft)scheduleDraft(150);
     }
     async function identify(g){
@@ -128,9 +150,59 @@
       account.warning="Cloud sync paused. Check your connection and retry.";
       notify(false);
     }
+    function scheduleFlush(){
+      if(flushJob || flushTimer)return;
+      flushTimer=setTimeout(()=>{flushTimer=null;flush().catch(()=>{});},40);
+    }
+    function dispatch(type,data={}){
+      if(account.phase!=="ready" || !stillSigned())throw Error("Log in again to save changes.");
+      const op={writer,seq:sequence+1,id:M.id(),context:OrbitCommands.context(account.state),type,data,at:Date.now()};
+      op.order=Math.max(op.at,(pending.at(-1)?.order||0)+1);
+      const next=structuredClone(account.state);
+      OrbitCommands.apply(next,op);
+      if(storage.set(opKey(op),JSON.stringify(op))===false)return commit(s=>OrbitCommands.apply(s,op));
+      sequence++;pending.push(op);
+      if(type==="launch")forgetDraft(draft);
+      account.state=next;notify(true);scheduleFlush();
+    }
+    function flush(){
+      clearTimeout(flushTimer);flushTimer=null;
+      if(flushJob)return flushJob;
+      if(!pending.length)return Promise.resolve();
+      const g=epoch;
+      async function drain(){
+        while(current(g) && pending.length){
+          const batch=pending.slice();
+          const remote=await store.transact(s=>{
+            const conflicts=[];
+            s.syncCursors??={};
+            for(const op of batch){
+              if(acknowledged(s,op))continue;
+              try{OrbitCommands.apply(s,op);}catch(e){conflicts.push(e.message);}
+              s.syncCursors[op.writer]=op.seq;
+            }
+            return conflicts;
+          });
+          if(!current(g))return;
+          accept(remote,false);
+          if(remote.value?.length){account.warning="A change conflicted with another device. "+remote.value[0];notify(false);}
+        }
+      }
+      flushJob=drain().catch(error=>{
+        if(current(g)){
+          if(!stillSigned())reset("signed-out","Log in again to reconnect your account.");
+          else showFailure();
+        }
+        throw error;
+      }).finally(()=>{if(current(g))flushJob=null;});
+      return flushJob;
+    }
     async function commit(action=()=>{},redraw=true){
       if(account.phase!=="ready" || !store)throw Error("Log in to open your outpost.");
-      const g=epoch, saved=draft,previous=account.state;
+      const g=epoch;
+      if(pending.length || flushJob)await flush();
+      if(!current(g))throw Error("Your account changed.");
+      const saved=draft,previous=account.state;
       const context=(previous.active||previous.result)?.id||null;
       const layout=s=>s.active?"active":s.result?"result":"station";
       const previousLayout=layout(previous);
@@ -176,6 +248,8 @@
           const who=await api.auth.getUser();if(!current(g))return;
           if(!A.permanent(who) || who.uuid!==account.who.uuid){await boot();return;}
         }
+        if(pending.length)await flush();
+        if(!current(g))return;
         if(draft){await commit(undefined,false);return;}
         const remote=await store.pull();
         if(!current(g))return;
@@ -188,11 +262,11 @@
     async function logout(){
       const g=epoch;
       if(account.phase==="signing-out")return;
-      if(account.phase==="ready" && (draft || pendingWrites)){
-        const flush=commit(undefined,false).catch(()=>{});
+      if(account.phase==="ready" && (draft || pendingWrites || pending.length)){
+        const saving=commit(undefined,false).catch(()=>{});
         phase("signing-out");
         let timeout;
-        try{await Promise.race([flush,new Promise(resolve=>{timeout=setTimeout(resolve,2500);})]);}
+        try{await Promise.race([saving,new Promise(resolve=>{timeout=setTimeout(resolve,2500);})]);}
         finally{clearTimeout(timeout);}
         if(!current(g))return;
       }
@@ -202,7 +276,7 @@
         if(current(done)){signal("logout");account.signup=false;reset("signed-out");}
       }
     }
-    return Object.assign(account,{boot,login,logout,chooseLegacy,commit,note,refresh,signalKey});
+    return Object.assign(account,{boot,login,logout,chooseLegacy,commit,dispatch,flush,note,refresh,signalKey});
   }
   globalThis.OrbitSession={create};
 })();
