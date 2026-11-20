@@ -1,5 +1,7 @@
 # Orbit Outpost
 
+[Open Orbit Outpost](https://alieneverything.github.io/alienthehelper/)
+
 Orbit Outpost is an alien-themed study timer. Focus sessions earn credits, chart stars, and develop the habitat where you studied. The site runs as static HTML, CSS, and JavaScript. Puter handles accounts and private cloud saves. [Puter website integration](https://docs.puter.com/supported-platforms/) · [Puter account storage](https://docs.puter.com/security/)
 
 ## Open it locally
