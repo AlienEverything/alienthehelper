@@ -146,6 +146,12 @@
       case "room-motion":
         if(!reducedMotion.matches)await change("motion",{enabled:!state.settings.motion});
         return;
+      case "inspect-landmark":{
+        const [world,points]=value.split("/");
+        const html=F.landmarkDetail(state,world,Number(points));
+        if(html)openDialog(html);
+        return;
+      }
       case "open-star":{
         const record=state.sessions.find(r=>r.id===value);
         if(!state.active && record)openDialog(F.starDetails(record));
