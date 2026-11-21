@@ -9,11 +9,19 @@
   const save=label=>`<button type="submit" class="primary">${esc(label)}</button>`;
   const attr=v=>esc(v);
   const field=(id,label,control)=>`<div class="form-field"><label for="${id}">${esc(label)}</label>${control}</div>`;
-  function settings(s,user){
+  const awakeHelp={
+    off:"Prevents auto-lock while Orbit Outpost is on screen, even between timers.",
+    waiting:"Asking your device to keep the screen awake…",
+    active:"Active while Orbit Outpost is on screen, even between timers.",
+    paused:"Your device paused this setting. Save settings to try again.",
+    unavailable:"This browser can’t keep the screen awake. On iPad, open this page in Safari 16.4 or later."
+  };
+  function settings(s,user,awakeStatus){
     const fields=[["focus","Focus"],["short","Short break"],["long","Long break"]].map(([k,label])=>field("setting-"+k,label,`<div class="num-unit"><input id="setting-${k}" name="${k}" type="number" required min="1" max="${M.limits[k]}" value="${s.settings[k]}"><span>min</span></div>`)).join("");
     return wrap("settings","Settings",`<div class="settings-section account-identity"><div><h3>Your account</h3><p>Signed in as ${esc(user.username)} on Puter</p></div><button type="button" class="secondary small" data-act="sign-out">Log out</button></div><h3 class="form-section">Session lengths</h3><div class="duration-fields">${fields}</div>
       ${field("goal-input","Daily goal",`<div class="num-unit"><input id="goal-input" type="number" name="goal" required min="1" max="${M.limits.goal}" value="${s.settings.goal}"><span>focus sessions</span></div>`)}
       ${field("setting-motion","Focus scenery",`<select name="motion" id="setting-motion"><option value="on" ${s.settings.motion?"selected":""}>Gentle motion</option><option value="off" ${!s.settings.motion?"selected":""}>Still scenery</option></select>`)}
+      <label class="awake-setting" for="setting-awake"><span><strong id="awake-label">Keep screen awake</strong><span id="awake-help" aria-live="polite">${awakeHelp[awakeStatus]}</span></span><input id="setting-awake" name="keepAwake" type="checkbox" role="switch" aria-labelledby="awake-label" aria-describedby="awake-help" ${s.settings.keepAwake?"checked":""} ${awakeStatus==="unavailable"?"disabled":""}></label>
       <div class="settings-section"><h3>Subjects</h3><button type="button" class="secondary small" data-act="manage-tags">${icon("tag",15)}Manage tags</button></div>
       <div class="backup"><h3>Progress backup</h3><p>Progress saves to your Puter account. Export a backup to keep a copy or move your outpost to a new website address.</p><div class="backup-actions"><button type="button" class="secondary small" data-act="export">${icon("download",15)}Export</button><button type="button" class="secondary small" data-act="import">${icon("upload",15)}Restore</button><input id="import-file" type="file" accept="application/json,.json" hidden></div></div>`,`${close}${save("Save settings")}`);
   }
@@ -47,5 +55,5 @@
   function confirm(title,message,act,label,value="",keep="Cancel") {
     return `${head(title)}<div class="dialog-body"><p class="dialog-copy">${esc(message)}</p></div><div class="dialog-actions"><button class="secondary" data-act="close-dialog" autofocus>${esc(keep)}</button><button class="danger-btn" data-act="${act}" data-value="${attr(value)}">${esc(label)}</button></div>`;
   }
-  globalThis.OrbitDialogs={settings,tagEditor,manageTags,taskEditor,sessionEditor,purchase,confirm};
+  globalThis.OrbitDialogs={settings,awakeHelp,tagEditor,manageTags,taskEditor,sessionEditor,purchase,confirm};
 })();

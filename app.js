@@ -7,6 +7,16 @@
   const defaults=()=>({taskFilter:"open",shopFilter:"all",collectionFilter:"all",logTag:"",logLimit:20,atlasWorld:null,atlasSheet:null});
   let ui=defaults(), state=M.fresh(), noticeId, settling=false, retryAfter=0, pendingRestore=null, focusOrigin=null, renderedDay="";
   const account=OrbitSession.create({notify:accountUpdated});
+  let pageShown=true;
+  const awakePausedNotice="Your device may still auto-lock. Tap the page to try again.";
+  const screenAwake=OrbitScreenAwake.create(navigator.wakeLock,status=>{
+    const help=dialog.querySelector("#awake-help");
+    if(help)help.textContent=D.awakeHelp[status];
+    if(status==="paused" && !dialog.open && !document.hidden)announce(awakePausedNotice);
+  });
+  function syncScreenAwake(){
+    screenAwake.setWanted(pageShown && document.visibilityState==="visible" && account.phase==="ready" && state.settings.keepAwake);
+  }
   function accountUpdated(redraw){
     if(account.phase==="ready")state=account.state;
     else{
@@ -15,6 +25,7 @@
       if(dialog.open)dialog.close();
       dialog.replaceChildren();
     }
+    syncScreenAwake();
     if(redraw)render();else syncWarning();
   }
   function syncWarning(){
@@ -139,7 +150,7 @@
     if(state.active && !["pause","room-motion","end-session","confirm-end","close-dialog"].includes(action))return;
     switch(action){
       case "close-dialog":closeDialog();return;
-      case "settings":openDialog(D.settings(state,account.who));return;
+      case "settings":openDialog(D.settings(state,account.who,screenAwake.status));return;
       case "mode":await change("mode",{mode:value});return;
       case "launch":await change("launch",{note:state.draft.note});return;
       case "pause":await change("pause",{paused:state.active?.endsAt!==null});return;
@@ -232,6 +243,7 @@
     }
   }
   document.addEventListener("click",event=>{
+    if(!dialog.open && screenAwake.status==="paused")screenAwake.retry();
     const el=event.target.closest("[data-act]");
     if(el && !el.disabled){
       if(el.hasAttribute("aria-busy"))return;
@@ -275,7 +287,14 @@
     if(form.dataset.form==="settings"){
       const settings=Object.fromEntries(Object.keys(M.limits).map(k=>[k,Number(val(k))]));
       if(Object.entries(settings).some(([k,v])=>!Number.isInteger(v)||v<1||v>M.limits[k]))throw Error("Use a whole number within each field’s range.");
-      await change("settings",{...settings,motion:val("motion")==="on"});closeDialog();announce("Settings saved.");return;
+      if(!form.elements.keepAwake.disabled){
+        settings.keepAwake=form.elements.keepAwake.checked;
+        if(settings.keepAwake && screenAwake.status==="paused")screenAwake.retry();
+      }
+      await change("settings",{...settings,motion:val("motion")==="on"});
+      closeDialog();
+      announce(screenAwake.status==="paused"?awakePausedNotice:"Settings saved.");
+      return;
     }
     if(form.dataset.form==="tag"){
       if(!name)throw Error("Give this subject a name.");
@@ -310,10 +329,17 @@
     if(account.phase==="ready")account.refresh(true).then(tick);
     else if(account.phase==="sdk-error" || account.phase==="cloud-error")account.boot();
   }
-  document.addEventListener("visibilitychange",()=>{if(!document.hidden)wake();});
+  document.addEventListener("visibilitychange",()=>{syncScreenAwake();if(!document.hidden)wake();});
   window.addEventListener("online",wake);
-  window.addEventListener("pageshow",event=>{if(event.persisted)account.boot();else tick();});
-  window.addEventListener("pagehide",()=>{if(account.phase==="ready" && document.activeElement?.id==="session-note")account.commit(undefined,false).catch(()=>{});});
+  window.addEventListener("pageshow",event=>{
+    pageShown=true;
+    if(event.persisted)account.boot();else tick();
+    syncScreenAwake();
+  });
+  window.addEventListener("pagehide",()=>{
+    pageShown=false;syncScreenAwake();
+    if(account.phase==="ready" && document.activeElement?.id==="session-note")account.commit(undefined,false).catch(()=>{});
+  });
   reducedMotion.addEventListener("change",()=>{if(state.active)render();});
   account.boot();
   setInterval(tick,400);

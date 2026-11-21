@@ -15,15 +15,19 @@
     return {
       version:2, credits:0, owned:["pip","lunar"], equipped:{companion:"pip",habitat:"lunar",gear:null},
       tags:[{id:"general",name:"General",color:"sage"},{id:"biology",name:"Biology",color:"lilac"},{id:"math",name:"Math",color:"blue"}],
-      tasks:[], sessions:[], settings:{focus:25,short:5,long:15,goal:4,motion:true},
+      tasks:[], sessions:[], settings:{focus:25,short:5,long:15,goal:4,motion:true,keepAwake:false},
       draft:{mode:"focus",tagId:"general",note:"",taskId:null}, active:null,result:null
     };
   }
   function upgrade(value) {
-    if(value?.version!==1)return value;
-    const equipped={...value.equipped,gear:null};
-    const active=value.active?{...value.active,loadout:E.loadout({equipped})}:null;
-    return {...value,version:2,equipped,active,settings:{...value.settings,motion:true}};
+    if(value?.version===1){
+      const equipped={...value.equipped,gear:null};
+      const active=value.active?{...value.active,loadout:E.loadout({equipped})}:null;
+      value={...value,version:2,equipped,active,settings:{...value.settings,motion:true}};
+    }
+    if(value?.version===2 && value.settings && value.settings.keepAwake===undefined)
+      return {...value,settings:{...value.settings,keepAwake:false}};
+    return value;
   }
   function start(s, now = Date.now(), sessionId = id()) {
     if (s.active || s.result) return;
@@ -95,7 +99,7 @@
     if (!s || s.version !== 2 || !whole(s.credits,0,Number.MAX_SAFE_INTEGER) ||
       !Array.isArray(s.tags) || !Array.isArray(s.tasks) || !Array.isArray(s.sessions) || !Array.isArray(s.owned) ||
       !s.settings || !s.equipped || !s.draft) throw Error("Choose a valid Orbit Outpost backup.");
-    if (!Object.entries(limits).every(([k,max])=>whole(s.settings[k],1,max)) || typeof s.settings.motion!=="boolean" ||
+    if (!Object.entries(limits).every(([k,max])=>whole(s.settings[k],1,max)) || typeof s.settings.motion!=="boolean" || typeof s.settings.keepAwake!=="boolean" ||
       !(s.equipped.gear===null || (s.owned.includes(s.equipped.gear) && item(s.equipped.gear)?.type==="gear")) ||
       !s.owned.every(value=>!!item(value)) || !["pip","lunar"].every(value=>s.owned.includes(value)) ||
       !["habitat","companion"].every(type=>s.owned.includes(s.equipped[type]) && item(s.equipped[type])?.type === type))
