@@ -19,12 +19,25 @@
   const item = id => items.find(product=>product.id===id);
   const perk = product => product.type==="habitat" ? "Chart a separate constellation and build an outpost here." : product.perk;
   const categoryNames = {companion:"Companions",habitat:"Habitats",gear:"Field gear"};
-  const stages = [
+  const sharedStages = [
     {at:0,name:"Landing site",image:null},
     {at:3,name:"Landing beacon",image:"beacon.png"},
     {at:9,name:"Field lab",image:"field-lab.png"},
     {at:18,name:"Observatory",image:"observatory.png"}
   ];
+  const advancedThresholds=[30,45,60];
+  const habitatLandmarks={
+    lunar:["Moonstone Orrery","Crescent Gate","Palace of the Twin Moons"],
+    aurora:["Prism Harp","Ribbonfall Bridge","Crown of the Aurora"],
+    ember:["Cinder Kiln","Sunforge Colossus","Citadel of the Last Sun"],
+    grotto:["Lanterncap Nursery","Mycelium Organ","Cathedral of Spores"],
+    reef:["Tideglass Lens","Nautilus Pavilion","Palace of the Living Reef"]
+  };
+  const habitatStages=Object.fromEntries(Object.entries(habitatLandmarks).map(([world,names])=>[
+    world,[...sharedStages,...names.map((name,i)=>({
+      at:advancedThresholds[i],name,image:`${world}-${advancedThresholds[i]}.png`,tier:i+4
+    }))]
+  ]));
   const archive = {id:"origin",name:"Origin archive",color:"blue",image:"lunar-hollow.webp"};
   const patchCredits=10;
   const slots = [
@@ -126,8 +139,9 @@
   function survey(s,habitat){
     const records=s.sessions.filter(r=>worldId(r)===habitat).sort((a,b)=>a.endedAt-b.endedAt || a.id.localeCompare(b.id));
     const points=records.reduce((n,r)=>n+(r.flight?.survey||0),0);
+    const stages=habitatStages[habitat]||sharedStages;
     const index=stages.findLastIndex(stage=>points>=stage.at);
-    return {records,points,stage:stages[index],next:stages[index+1]||null};
+    return {records,points,stages,stage:stages[index],next:stages[index+1]||null};
   }
   function validFlight(f,minute){
     if(f==null)return true; // Earlier versions did not record a habitat.
@@ -142,5 +156,5 @@
     const valid=assignments(f.day).map(card=>card.id);
     return f.missions.length<=3 && new Set(f.missions).size===f.missions.length && f.missions.every(id=>valid.includes(id));
   }
-  globalThis.OrbitExpedition={items,item,perk,categoryNames,archive,stages,patchCredits,dayKey,daily,loadout,chart,missionCredits,totalCredits,worldId,survey,validFlight};
+  globalThis.OrbitExpedition={items,item,perk,categoryNames,archive,stages:sharedStages,patchCredits,dayKey,daily,loadout,chart,missionCredits,totalCredits,worldId,survey,validFlight};
 })();

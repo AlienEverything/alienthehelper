@@ -50,3 +50,15 @@ The built-in ImageGen tool produced four original atlases. The game serves the e
 [beacon.png](dist/assets/beacon.png) · [field-lab.png](dist/assets/field-lab.png) · [observatory.png](dist/assets/observatory.png)
 
 > Production art for a cozy 1990s pixel-art science-fiction game. Wide 3:1 horizontal transparent sprite sheet in exactly THREE equal square cells. Each cell centers a complete freestanding tiny isometric planetary outpost landmark, fixed-angle view slightly from the front and above, generous transparent margins on all sides. LEFT tier 1: a modest slender mint navigation beacon tower, a glowing turquoise square bulb, black and seafoam stepped body mounted on four sturdy feet, simple silhouette completely visible. MIDDLE tier 2: a compact one-storey modular field science laboratory, indigo-grey housing and pale mint metal panels, bright teal slit windows with warm amber doorway and one small antenna, broad recognizable base. RIGHT tier 3: a grander observatory building, distinctive pale amethyst faceted dome, indigo segmented band, short star telescope, mint portholes and warmly lit tiny door, compact square research foundation. The tiers should visibly develop from thin small beacon through a rectangular lab to a larger jewel-shaped space observatory. Sharp authentic 48x48 RPG building sprites, nearest-neighbor square pixels, defined outlines, stepped hard-edged shading, side-light from upper left, appealing small-game silhouettes. All three sit on precisely the same baseline and fit wholly inside their separate cell. Buildings only with minimal integral little pads; transparent surrounding space, genuine transparent background. Absolutely no terrain squares, grass, rocks, separate shadows behind the objects, sky, horizon, labels, letters, signs, frames or UI.
+
+## Habitat landmarks
+
+The fifteen advanced landmarks were generated as a transparent isometric pixel-art sprite sheet, then cropped into individual PNGs with a maximum edge of 192 pixels. Each row follows the habitat palette and each column represents a survey threshold.
+
+| Habitat | 30 points | 45 points | 60 points |
+| --- | --- | --- | --- |
+| Lunar Hollow | Moonstone Orrery | Crescent Gate | Palace of the Twin Moons |
+| Aurora Basin | Prism Harp | Ribbonfall Bridge | Crown of the Aurora |
+| Ember Dunes | Cinder Kiln | Sunforge Colossus | Citadel of the Last Sun |
+| Glowcap Grotto | Lanterncap Nursery | Mycelium Organ | Cathedral of Spores |
+| Tideglass Reef | Tideglass Lens | Nautilus Pavilion | Palace of the Living Reef |

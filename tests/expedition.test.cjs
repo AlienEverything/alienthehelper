@@ -89,3 +89,20 @@ test("each complete three-minute block earns one base credit; historical payouts
   saved.sessions.at(-1).earned=44;
   assert.throws(()=>M.validateBackup(saved));
 });
+test("each habitat unlocks its own three advanced landmarks from saved survey points",()=>{
+  const worlds=M.items.filter(i=>i.type==="habitat");
+  const art=new Set(),names=new Set();
+  for(const world of worlds){
+    const s=M.fresh();
+    s.sessions=[{id:"survey",endedAt:noon,flight:{habitat:world.id,survey:0}}];
+    for(const [points,at,next] of [[0,0,3],[17,9,18],[18,18,30],[29,18,30],[30,30,45],[44,30,45],[45,45,60],[59,45,60],[60,60,null],[90,60,null]]){
+      s.sessions[0].flight.survey=points;
+      const area=E.survey(s,world.id);
+      assert.deepEqual(area.stages.slice(1).map(t=>t.at),[3,9,18,30,45,60]);
+      assert.equal(area.stage.at,at);assert.equal(area.next?.at??null,next);
+      if(points===at && at>=30){art.add(area.stage.image);names.add(area.stage.name);}
+    }
+    assert.equal(E.survey(s,worlds.find(w=>w!==world).id).stage.at,0);
+  }
+  assert.equal(names.size,15);assert.equal(art.size,15);
+});

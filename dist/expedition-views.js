@@ -8,7 +8,7 @@
   const credit=(n,label="")=>`<span class="credit-amount">${coin}${n}${label?" "+label:""}</span>`;
   const meter=(value,max,label)=>`<div class="exp-meter" role="progressbar" aria-label="${esc(label)}" aria-valuemin="0" aria-valuemax="${max}" aria-valuenow="${Math.min(max,value)}"><i style="width:${Math.min(100,value/max*100)}%"></i></div>`;
   function landmark(stage,cls){
-    return stage.image?img(stage.image,cls,stage.name):"";
+    return stage.image?img(stage.image,stage.tier?`${cls} landmark-tier-${stage.tier}`:cls,stage.name):"";
   }
   function stationLinks(s){
     const board=E.daily(s);
@@ -58,13 +58,30 @@
     if(region.id===E.archive.id){
       return `<section class="panel archive-info">${sectionHead("Earlier sessions","book","blue")}<p>These sessions were recorded before habitat tracking. Each star opens its original study details.</p></section>`;
     }
-    const {stage,next,points}=survey;
-    const preview=stage.image||E.stages[1].image;
-    const milestones=E.stages.slice(1).map(t=>`<span class="${points>=t.at?"reached":""}">${icon(points>=t.at?"check":"flag",13)}${t.name}<small>${t.at} pts</small></span>`).join("");
-    return `<section class="panel outpost-progress"><div class="outpost-summary"><div class="structure-tile ${region.color}">${img(preview,stage.image?"":"blueprint",stage.image?stage.name:"Landing beacon blueprint")}</div>
-      <div><span class="exp-eyebrow">Outpost progress</span><h2>${stage.name}</h2><p>${next?`${plural(next.at-points,"survey point")} to the ${next.name.toLowerCase()}.`:`${plural(points,"survey point")} recorded here.`}</p></div></div>
-      <div class="stage-progress"><div class="survey-readout"><span>Survey points</span><b>${points}</b></div>${meter(points,E.stages.at(-1).at,"Outpost survey progress")}<div class="milestones">${milestones}</div></div>
+    const {stage,next,points,stages}=survey;
+    const preview=stage.image||stages[1].image;
+    const milestones=stages.slice(1).map(t=>{
+      const reached=points>=t.at,current=t===stage;
+      return `<li><button type="button" data-act="inspect-landmark" data-value="${region.id}/${t.at}" aria-label="View ${esc(t.name)}, ${t.at} survey points, ${current?"current":reached?"unlocked":"locked"}" class="landmark-card ${reached?"reached":"locked"}" ${current?'aria-current="step"':""}>
+        <span class="landmark-plate">${img(t.image)}</span><strong>${esc(t.name)}</strong>
+        <small>${icon(reached?"check":"flag",13)}${t.at} pts<span class="sr-only"> · ${current?"Current":reached?"Unlocked":"Locked"}</span></small></button></li>`;
+    }).join("");
+    return `<section class="panel outpost-progress ${region.color}"><div class="outpost-summary"><div class="structure-tile ${region.color}">${img(preview,stage.image?"":"blueprint",stage.image?stage.name:"Landing beacon blueprint")}</div>
+      <div><span class="exp-eyebrow">Outpost progress</span><h2>${stage.name}</h2><p>${next?`${plural(next.at-points,"survey point")} until ${next.name}.`:`${plural(points,"survey point")} recorded here.`}</p></div></div>
+      <div class="stage-progress"><div class="survey-readout"><span>Survey points</span><b>${points}</b></div>${meter(points,stages.at(-1).at,"Outpost survey progress")}</div>
+      <ol class="milestones" aria-label="${esc(region.name)} landmarks">${milestones}</ol>
       <p class="survey-tip">${icon("gear",15)}Earn 1 survey point per 10 minutes in a completed session. Crew and gear can add more.</p></section>`;
+  }
+  function landmarkDetail(s,worldId,threshold){
+    const region=M.item(worldId);
+    if(region?.type!=="habitat" || !s.owned.includes(worldId))return "";
+    const area=E.survey(s,worldId),stage=area.stages.find(t=>t.at===threshold && t.image);
+    if(!stage)return "";
+    const status=area.points>=threshold?"Unlocked":`${plural(threshold-area.points,"survey point")} to unlock`;
+    return `${detailHead(stage.name)}<div class="dialog-body landmark-detail ${region.color}">
+      <div class="landmark-window"><img class="landmark-backdrop" src="${art(region)}" alt="">${landmark(stage,"landmark-portrait")}</div>
+      <div class="landmark-facts"><strong>${esc(region.name)}</strong><span>${threshold} survey points</span></div><p>${status}</p>
+      </div><div class="dialog-actions"><button class="primary" data-act="close-dialog">Done</button></div>`;
   }
   function atlas(s,ui){
     const worlds=M.items.filter(p=>p.type==="habitat" && s.owned.includes(p.id));
@@ -114,7 +131,11 @@
     const r=s.result,focus=r.mode==="focus",f=r.flight,next=s.sessions.length%4===0?"long":"short";
     const crew=M.item(f?.companion||s.equipped.companion),world=M.item(f?.habitat||s.equipped.habitat);
     let milestone="";
-    if(f){const area=E.survey(s,f.habitat);if(area.stage.at>area.points-f.survey)milestone=`<p class="report-landmark">${icon("flag",15)}${area.stage.name} established</p>`;}
+    if(f){
+      const area=E.survey(s,f.habitat);
+      milestone=area.stages.filter(t=>t.at>area.points-f.survey && t.at<=area.points)
+        .map(t=>`<p class="report-landmark">${landmark(t,"reward-landmark")}<span>${esc(t.name)} established</span></p>`).join("");
+    }
     return `<main id="main-content" tabindex="-1" class="quiet"><section class="result-card flight-report">${img(f?.patch?"mission-patch.png":crew.image,"result-buddy",f?.patch?"Daily flight patch":"")}
       <h1>${focus?"Session complete":"Break complete"}</h1><p>${focus?`${plural(r.minutes,"minute")} of focus · ${esc(r.tagName)}`:`Your ${r.minutes}-minute break is over.`}</p>
       ${focus?`<div class="result-credit">${coin}+${plural(E.totalCredits(r),"credit")}</div>`:""}${focus && f && (f.gearCredits||f.missions.length||f.patch)?creditRows(s,r):""}
@@ -145,5 +166,5 @@
     const records=E.survey(s,E.worldId(record)).records;
     return Math.max(0,Math.floor(records.findIndex(r=>r.id===record.id)/plotPoints.length));
   }
-  globalThis.OrbitFlightViews={sheetFor,stationLinks,landmark,challenges,atlas,focusRoom,result,starDetails,patchDetails};
+  globalThis.OrbitFlightViews={sheetFor,stationLinks,landmark,landmarkDetail,challenges,atlas,focusRoom,result,starDetails,patchDetails};
 })();
