@@ -61,7 +61,7 @@ test("short timers earn a star without qualifying for crew, gear or gated challe
   const short=study(s,noon,1);
   assert.equal(short.flight.survey,0);assert.equal(short.flight.gearCredits,0);assert.equal(E.totalCredits(short),0);
   const long=study(s,noon+3600000,45);
-  assert.equal(long.flight.survey,8);assert.equal(long.flight.gearCredits,4);assert.equal(E.survey(s,"lunar").records.length,2);
+  assert.equal(long.flight.survey,7);assert.equal(long.flight.gearCredits,4);assert.equal(E.survey(s,"lunar").records.length,2);
 });
 test("old backups and in-flight timers retain balances, notes, purchases and task progress",()=>{
   const old=M.fresh();old.version=1;delete old.settings.motion;delete old.equipped.gear;
@@ -138,7 +138,7 @@ test("the daily draw samples 61 distinct, tag-independent challenges and stays s
 test("paid legacy slots and the set bonus survive a mid-day update",()=>{
   const s=M.fresh(),start=new Date(2026,10,17,9).getTime();
   const old=study(s,start,45);
-  delete old.flight.missionSet;old.flight.missions=["subject"];old.flight.patch=false;
+  delete old.flight.crewRules;delete old.flight.missionSet;old.flight.missions=["subject"];old.flight.patch=false;
   s.credits=old.earned+4;
   assert.equal(E.missionCredits(old.flight),4);
   const before=E.daily(s,old.flight.day);
@@ -154,8 +154,8 @@ test("paid legacy slots and the set bonus survive a mid-day update",()=>{
   const next=study(s,start+7*3600000,45);
   assert.deepEqual(next.flight.missions,[]);assert.equal(next.flight.patch,false);
 });
-test("Wisp banks qualifying minutes across sessions and resets its cap each day",()=>{
-  const s=M.fresh();s.owned.push("wisp","aurora");s.equipped.companion="wisp";
+test("Nyx banks qualifying minutes across sessions and resets its cap each day",()=>{
+  const s=M.fresh();s.owned.push("nyx","aurora");s.equipped.companion="nyx";
   const earn=(time,minutes)=>study(s,time,minutes).flight.crewSurvey;
   assert.equal(earn(noon,9),0);
   assert.equal(earn(noon+3600000,15),0);
@@ -166,11 +166,11 @@ test("Wisp banks qualifying minutes across sessions and resets its cap each day"
   assert.equal(earn(noon+86400000,60),4);
   assert.doesNotThrow(()=>M.validateLive(s));
 });
-test("Nyx uses the actual gap before the session, including across midnight",()=>{
+test("Wisp uses the actual gap before the session, including across midnight",()=>{
   for(const [gap,points] of [[4,0],[5,2],[30,2],[31,0]]){
-    const s=M.fresh();s.owned.push("nyx");
+    const s=M.fresh();s.owned.push("wisp");
     const start=new Date(2026,10,20,23,48).getTime();
-    study(s,start,10);s.result=null;s.equipped.companion="nyx";
+    study(s,start,10);s.result=null;s.equipped.companion="wisp";
     const restart=start+(10+gap)*60000;
     M.start(s,restart);M.togglePause(s,restart+60000);M.togglePause(s,restart+40*60000);
     M.settle(s,s.active.endsAt);
@@ -183,4 +183,38 @@ test("Sol rewards task steps and gives its completion bonus once",()=>{
   assert.equal(study(s,noon+3600000,10).flight.crewSurvey,2);
   assert.equal(s.tasks[0].done,true);
   assert.equal(study(s,noon+2*3600000,25).flight.crewSurvey,0);
+});
+
+test("prices change in place and purchases charge the displayed price",()=>{
+  const prices=[["pip",0],["wisp",25],["sol",60],["nyx",75],["fenn",115],["lunar",0],["aurora",50],["ember",85],["grotto",100],["reef",140]];
+  assert.deepEqual(E.items.filter(p=>p.type!=="gear").map(p=>[p.id,p.price]),prices);
+  for(const [id,price] of prices.filter(([,n])=>n>0)){
+    const s=M.fresh();s.credits=price-1;
+    assert.equal(M.buy(s,id),false);
+    s.credits=price;assert.equal(M.buy(s,id),true);
+    assert.equal(s.credits,0);assert.equal(s.owned.includes(id),true);
+  }
+});
+test("Fenn earns one survey point per complete eight minutes at every supported duration",()=>{
+  for(let minutes=1;minutes<=180;minutes++){
+    const s=M.fresh();s.owned.push("fenn");s.equipped.companion="fenn";
+    const r=study(s,noon,minutes);
+    assert.equal(r.flight.survey,Math.floor(minutes/8));
+    assert.equal(r.earned,Math.floor(minutes/3));
+    assert.doesNotThrow(()=>M.validateLive(s));
+  }
+});
+test("prior companion payouts survive restore and old Nyx sessions do not fill the new bank",()=>{
+  const s=M.fresh();s.owned.push("wisp","nyx","fenn");
+  for(const [i,[id,minutes,award]] of [["wisp",60,4],["nyx",30,2],["fenn",45,2]].entries()){
+    s.equipped.companion=id;
+    const f=study(s,noon+i*3600000,minutes).flight;
+    delete f.crewRules;
+    f.crewSurvey=award;f.survey=Math.floor(minutes/10)+award;
+  }
+  const restored=M.validateLive(JSON.parse(JSON.stringify(s)));
+  assert.equal(E.survey(restored,"lunar").points,21);
+  restored.equipped.companion="nyx";
+  assert.equal(study(restored,noon+3*3600000,15).flight.crewSurvey,0);
+  assert.equal(study(restored,noon+4*3600000,15).flight.crewSurvey,2);
 });

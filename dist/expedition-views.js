@@ -70,7 +70,7 @@
       <div><span class="exp-eyebrow">Outpost progress</span><h2>${stage.name}</h2><p>${next?`${plural(next.at-points,"survey point")} until ${next.name}.`:`${plural(points,"survey point")} recorded here.`}</p></div></div>
       <div class="stage-progress"><div class="survey-readout"><span>Survey points</span><b>${points}</b></div>${meter(points,stages.at(-1).at,"Outpost survey progress")}</div>
       <ol class="milestones" aria-label="${esc(region.name)} landmarks">${milestones}</ol>
-      <p class="survey-tip">${icon("gear",15)}Earn 1 survey point per 10 minutes in a completed session. Crew and gear can add more.</p></section>`;
+      <p class="survey-tip">${icon("gear",15)}Completed focus sessions earn 1 survey point per 10 minutes, or per 8 minutes with Fenn. Gear can add more.</p></section>`;
   }
   function landmarkDetail(s,worldId,threshold){
     const region=M.item(worldId);
