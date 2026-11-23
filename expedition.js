@@ -3,14 +3,14 @@
 
   const items = [
     {id:"pip",type:"companion",name:"Pip",price:0,image:"pip.png",color:"sage",detail:"A curious little moon sprout.",perk:"+1 survey point for a session of 10+ minutes with a note."},
-    {id:"wisp",type:"companion",name:"Wisp",price:25,image:"wisp.png",color:"lilac",detail:"A soft-spoken drifter from the outer rings.",perk:"Bank minutes from 10+ minute sessions with Wisp. Every 30 minutes earns +2 survey points, up to +4 per day."},
-    {id:"sol",type:"companion",name:"Sol",price:75,image:"sol.png",color:"peach",detail:"A sun-warmed friend from the dunes.",perk:"Earn +1 survey point for each 10+ minute session advancing a linked task, or +2 for the session that completes it."},
-    {id:"nyx",type:"companion",name:"Nyx",price:60,image:"nyx.png",color:"blue",detail:"A midnight moth that scouts unfamiliar skies.",perk:"Earn +2 survey points when you start a 10+ minute session 5–30 minutes after finishing another focus session of at least 10 minutes."},
-    {id:"fenn",type:"companion",name:"Fenn",price:115,image:"fenn.png",color:"peach",detail:"A patient, coral-frilled reef dweller.",perk:"+2 survey points for a session of 45+ minutes."},
+    {id:"wisp",type:"companion",name:"Wisp",price:25,image:"wisp.png",color:"lilac",detail:"A soft-spoken drifter from the outer rings.",perk:"Earn +2 survey points when you start a 10+ minute session 5–30 minutes after finishing another focus session of at least 10 minutes."},
+    {id:"sol",type:"companion",name:"Sol",price:60,image:"sol.png",color:"peach",detail:"A sun-warmed friend from the dunes.",perk:"Earn +1 survey point for each 10+ minute session advancing a linked task, or +2 for the session that completes it."},
+    {id:"nyx",type:"companion",name:"Nyx",price:75,image:"nyx.png",color:"blue",detail:"A midnight moth that scouts unfamiliar skies.",perk:"Bank minutes from 10+ minute sessions with Nyx. Every 30 minutes earns +2 survey points, up to +4 per day."},
+    {id:"fenn",type:"companion",name:"Fenn",price:115,image:"fenn.png",color:"peach",detail:"A patient, coral-frilled reef dweller.",perk:"Earn 1 survey point for every 8 full minutes in a completed focus session."},
     {id:"lunar",type:"habitat",name:"Lunar Hollow",price:0,image:"lunar-hollow.webp",color:"lilac",detail:"Violet peaks under a quiet ringed moon."},
     {id:"aurora",type:"habitat",name:"Aurora Basin",price:50,image:"aurora-basin.webp",color:"aqua",detail:"A still lagoon beneath ribbons of green light."},
-    {id:"ember",type:"habitat",name:"Ember Dunes",price:100,image:"ember-dunes.webp",color:"peach",detail:"Copper mesas at the edge of dusk."},
-    {id:"grotto",type:"habitat",name:"Glowcap Grotto",price:85,image:"glowcap-grotto.webp",color:"lilac",detail:"Luminous mushrooms shelter a quiet cave outpost."},
+    {id:"ember",type:"habitat",name:"Ember Dunes",price:85,image:"ember-dunes.webp",color:"peach",detail:"Copper mesas at the edge of dusk."},
+    {id:"grotto",type:"habitat",name:"Glowcap Grotto",price:100,image:"glowcap-grotto.webp",color:"lilac",detail:"Luminous mushrooms shelter a quiet cave outpost."},
     {id:"reef",type:"habitat",name:"Tideglass Reef",price:140,image:"tideglass-reef.webp",color:"aqua",detail:"Glass-blue tide pools catch the first pink light."},
     {id:"scanner",type:"gear",name:"Survey scanner",price:45,image:"scanner.png",color:"sage",detail:"A handheld reader for mapping new terrain.",perk:"+1 survey point for a session of 15+ minutes."},
     {id:"relay",type:"gear",name:"Signal relay",price:70,image:"relay.png",color:"peach",detail:"A field radio for checking in on assignments.",perk:"+3 credits for a task-linked session of 15+ minutes."},
@@ -201,12 +201,15 @@
   function loadout(s){
     return {habitat:s.equipped.habitat,companion:s.equipped.companion,gear:s.equipped.gear??null};
   }
+  // Store the extra points above the standard rate as Fenn’s contribution to the star.
+  const fennBonus=minutes=>Math.floor(minutes/8)-Math.floor(minutes/10);
   function crewBonus(s,record,flight,previous,startedAt){
+    if(flight.companion==="fenn")return fennBonus(record.minutes);
     if(record.minutes<10)return 0;
     switch(flight.companion){
       case "pip":return Number(flight.noted);
-      case "wisp":{
-        const bank=total(previous.filter(r=>r.flight.missionSet===2 && r.flight.companion==="wisp" && r.minutes>=10),r=>r.minutes);
+      case "nyx":{
+        const bank=total(previous.filter(r=>r.flight.crewRules===2 && r.flight.companion==="nyx" && r.minutes>=10),r=>r.minutes);
         const payout=n=>2*Math.min(2,Math.floor(n/30));
         return payout(bank+record.minutes)-payout(bank);
       }
@@ -214,13 +217,12 @@
         const task=s.tasks.find(t=>t.id===record.taskId && !t.done);
         return task?(task.count+1>=task.target?2:1):0;
       }
-      case "nyx":{
+      case "wisp":{
         const last=s.sessions.reduce((latest,r)=>r.endedAt<=startedAt && (!latest || r.endedAt>latest.endedAt)?r:latest,null);
         if(!last || last.minutes<10)return 0;
         const gap=startedAt-last.endedAt;
         return gap>=5*60000 && gap<=30*60000?2:0;
       }
-      case "fenn":return record.minutes>=45?2:0;
       default:return 0;
     }
   }
@@ -228,7 +230,7 @@
     const day=dayKey(record.endedAt);
     const previous=s.sessions.filter(r=>r.flight?.day===day);
     const flight={...equipment,day,noted:!!record.note.trim(),linked:!!record.taskId,subject:record.tagId,
-      crewSurvey:0,gearSurvey:0,gearCredits:0,survey:0,missionSet:2,missions:[],patch:false};
+      crewRules:2,crewSurvey:0,gearSurvey:0,gearCredits:0,survey:0,missionSet:2,missions:[],patch:false};
     flight.crewSurvey=crewBonus(s,record,flight,previous,startedAt);
     if(flight.gear==="scanner" && record.minutes>=15)flight.gearSurvey=1;
     if(flight.gear==="relay" && flight.linked && record.minutes>=15)flight.gearCredits=3;
@@ -252,10 +254,15 @@
   function validFlight(f,minute){
     if(f==null)return true; // Earlier versions did not record a habitat.
     const small=(n,max)=>Number.isSafeInteger(n) && n>=0 && n<=max;
-    if(typeof f!=="object" || item(f.habitat)?.type!=="habitat" || item(f.companion)?.type!=="companion" ||
+    if(typeof f!=="object" || (f.crewRules!==undefined && f.crewRules!==2))return false;
+    const bankingCrew=f.crewRules===2?"nyx":"wisp";
+    const validCrew=f.crewRules===2 && f.companion==="fenn"
+      ? f.crewSurvey===fennBonus(minute)
+      : small(f.crewSurvey,f.missionSet===2 && f.companion===bankingCrew?4:2);
+    if(item(f.habitat)?.type!=="habitat" || item(f.companion)?.type!=="companion" ||
       !(f.gear===null || item(f.gear)?.type==="gear") || typeof f.day!=="string" || !/^\d{4}-\d{2}-\d{2}$/.test(f.day) ||
       typeof f.subject!=="string" || !/^[a-zA-Z0-9_-]{1,80}$/.test(f.subject) || typeof f.noted!=="boolean" ||
-      typeof f.linked!=="boolean" || typeof f.patch!=="boolean" || !small(f.crewSurvey,f.missionSet===2 && f.companion==="wisp"?4:2) || !small(f.gearSurvey,2) ||
+      typeof f.linked!=="boolean" || typeof f.patch!=="boolean" || !validCrew || !small(f.gearSurvey,2) ||
       !small(f.gearCredits,4) || f.survey!==Math.floor(minute/10)+f.crewSurvey+f.gearSurvey || !Array.isArray(f.missions))return false;
     const stamp=new Date(f.day+"T12:00:00");
     if(!Number.isFinite(stamp.getTime()) || dayKey(stamp)!==f.day)return false;
