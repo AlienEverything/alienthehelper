@@ -18,9 +18,9 @@ function prepare(){
 }
 test("three rotating missions, one payout per mission and one daily patch",()=>{
   const s=prepare();
-  for(let i=0;i<3;i++){
+  for(const [i,minutes] of [25,15,15,25,25].entries()){
     s.draft.note="Write the derivation.";s.draft.tagId=i%2?"math":"biology";
-    study(s,noon+i*3600000);
+    study(s,noon+i*3600000,minutes);
     assert.equal(M.settle(s,noon+4*3600000),false);
   }
   const board=E.daily(s,E.dayKey(noon));
@@ -28,7 +28,7 @@ test("three rotating missions, one payout per mission and one daily patch",()=>{
   const paid=s.sessions.flatMap(r=>r.flight.missions);
   assert.equal(paid.length,3);assert.equal(new Set(paid).size,3);
   assert.equal(s.sessions.filter(r=>r.flight.patch).length,1);
-  assert.equal(s.credits,3*8+4+6+8+10);
+  assert.equal(s.credits,3*8+2*5+4+6+8+10);
   const next=E.daily(s,E.dayKey(new Date(2026,10,21,12)));
   assert.equal(next.completed,0);assert.equal(next.patch,false);assert.notDeepEqual(next.cards.map(c=>c.id),board.cards.map(c=>c.id));
   for(const r of s.sessions){r.tagId="general";r.note="";}
@@ -105,4 +105,82 @@ test("each habitat unlocks its own three advanced landmarks from saved survey po
     assert.equal(E.survey(s,worlds.find(w=>w!==world).id).stage.at,0);
   }
   assert.equal(names.size,15);assert.equal(art.size,15);
+});
+
+test("the daily draw samples 61 distinct, tag-independent challenges and stays stable on reload",()=>{
+  const pool=new Map(),sets=new Set(),state=M.fresh();
+  state.tags[0].name="Everything";
+  for(let n=0;n<730;n++){
+    const day=E.dayKey(new Date(2025,0,1+n,12)),cards=E.daily(state,day).cards;
+    assert.equal(new Set(cards.map(c=>c.id)).size,3);
+    assert.deepEqual(cards.map(c=>c.reward),[4,6,8]);
+    const ids=cards.map(c=>c.id);
+    assert.deepEqual(E.daily(structuredClone(state),day).cards.map(c=>c.id),ids);
+    sets.add(ids.sort().join(","));
+    for(const c of cards){
+      assert.doesNotMatch(c.description,/\b(tag|subject|general)\b/i);
+      assert.equal(c.progress,0);
+      pool.set(c.id,c);
+    }
+  }
+  assert.equal(pool.size,61);
+  assert.equal(new Set([...pool.values()].map(c=>c.description)).size,61);
+  assert.ok(sets.size>650);
+  // Every objective must be achievable with the starter habitat, companion and one renamed tag.
+  const rows=[];
+  for(const [minutes,noted,taskId] of [
+    [10,false,null],[15,true,"a"],[15,true,"a"],[15,true,"b"],[35,true,"b"],
+    [35,true,"b"],[25,true,"a"],[25,true,"a"],[40,true,null],[25,true,null],
+    [35,true,"a"],[10,true,null],[15,true,null],[15,true,null],[15,true,null]
+  ])rows.push({minutes,taskId,tagId:"general",flight:{subject:"general",noted,linked:!!taskId,survey:Math.floor(minutes/10),habitat:"lunar"}});
+  for(const card of pool.values())assert.ok(card.measure(rows)>=card.target,card.name);
+});
+test("paid legacy slots and the set bonus survive a mid-day update",()=>{
+  const s=M.fresh(),start=new Date(2026,10,17,9).getTime();
+  const old=study(s,start,45);
+  delete old.flight.missionSet;old.flight.missions=["subject"];old.flight.patch=false;
+  s.credits=old.earned+4;
+  assert.equal(E.missionCredits(old.flight),4);
+  const before=E.daily(s,old.flight.day);
+  assert.equal(before.completed,1);assert.equal(before.cards[0].paid,true);
+  assert.doesNotMatch(before.cards[0].description,/subject|tag|general/i);
+  for(const [i,length] of [15,15,25,35,45].entries())study(s,start+(i+1)*3600000,length);
+  assert.ok(s.sessions.flatMap(r=>r.flight.missions).length<=3);
+  old.flight.missions=["subject","time45","variety"];old.flight.patch=true;
+  s.sessions=[old];s.result=null;s.credits=old.earned+18+10;
+  assert.equal(E.daily(s,old.flight.day).completed,3);
+  assert.equal(E.totalCredits(old),s.credits);
+  assert.deepEqual(M.validateBackup(s),s);
+  const next=study(s,start+7*3600000,45);
+  assert.deepEqual(next.flight.missions,[]);assert.equal(next.flight.patch,false);
+});
+test("Wisp banks qualifying minutes across sessions and resets its cap each day",()=>{
+  const s=M.fresh();s.owned.push("wisp","aurora");s.equipped.companion="wisp";
+  const earn=(time,minutes)=>study(s,time,minutes).flight.crewSurvey;
+  assert.equal(earn(noon,9),0);
+  assert.equal(earn(noon+3600000,15),0);
+  s.equipped.habitat="aurora";
+  assert.equal(earn(noon+2*3600000,15),2);
+  assert.equal(earn(noon+3*3600000,60),2);
+  assert.equal(earn(noon+5*3600000,30),0);
+  assert.equal(earn(noon+86400000,60),4);
+  assert.doesNotThrow(()=>M.validateLive(s));
+});
+test("Nyx uses the actual gap before the session, including across midnight",()=>{
+  for(const [gap,points] of [[4,0],[5,2],[30,2],[31,0]]){
+    const s=M.fresh();s.owned.push("nyx");
+    const start=new Date(2026,10,20,23,48).getTime();
+    study(s,start,10);s.result=null;s.equipped.companion="nyx";
+    const restart=start+(10+gap)*60000;
+    M.start(s,restart);M.togglePause(s,restart+60000);M.togglePause(s,restart+40*60000);
+    M.settle(s,s.active.endsAt);
+    assert.equal(s.result.flight.crewSurvey,points);
+  }
+});
+test("Sol rewards task steps and gives its completion bonus once",()=>{
+  const s=prepare();s.owned.push("sol");s.equipped.companion="sol";s.tasks[0].target=2;
+  assert.equal(study(s,noon,10).flight.crewSurvey,1);
+  assert.equal(study(s,noon+3600000,10).flight.crewSurvey,2);
+  assert.equal(s.tasks[0].done,true);
+  assert.equal(study(s,noon+2*3600000,25).flight.crewSurvey,0);
 });

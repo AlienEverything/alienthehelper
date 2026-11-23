@@ -50,7 +50,7 @@
     const record = {id:a.id,mode:a.mode,minutes:a.minutes,endedAt:a.endsAt,tagId:a.tagId,tagName:a.tagName,
       tagColor:a.tagColor,note:a.note,taskId:a.taskId,taskName:a.taskName,earned};
     if (a.mode === "focus" && !s.sessions.some(session => session.id === a.id)) {
-      E.chart(s,record,a.loadout||E.loadout(s));
+      E.chart(s,record,a.loadout||E.loadout(s),a.startedAt);
       s.sessions.unshift(record);
       s.credits += E.totalCredits(record);
       const task = s.tasks.find(t => t.id === a.taskId);
