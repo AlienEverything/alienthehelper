@@ -10,6 +10,7 @@
     }
     if(M.settle(s,at) || type==="settle")return;
     switch(type){
+      case "claim-reward":OrbitExpedition.claimReward(s,d.day,d.id);break;
       case "mode":if(Object.hasOwn(M.modes,d.mode))s.draft.mode=d.mode;break;
       case "launch":
         if(d.note!==undefined)s.draft.note=d.note;

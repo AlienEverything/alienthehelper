@@ -182,13 +182,15 @@
   function boardFromRows(day,rows){
     const ordered=rows.slice().sort((a,b)=>a.endedAt-b.endedAt || a.id.localeCompare(b.id));
     const paid=new Set(ordered.flatMap(r=>r.flight.missions));
+    const pending=new Set(ordered.flatMap(r=>r.flight.pendingMissions||[]));
     const old=legacyBoard(day);
     const cards=assignments(day).map((card,i)=>{
       if(paid.has(old[i].id))return {...old[i],paid:true,progress:1};
       const done=paid.has(card.id);
-      return {...card,paid:done,progress:done?card.target:Math.min(card.target,card.measure(ordered))};
+      const ready=!done && pending.has(card.id);
+      return {...card,paid:done,ready,progress:done||ready?card.target:Math.min(card.target,card.measure(ordered))};
     });
-    return {day,cards,patch:ordered.some(r=>r.flight.patch),completed:cards.filter(c=>c.paid).length};
+    return {day,cards,patch:ordered.some(r=>r.flight.patch),pendingPatch:ordered.some(r=>r.flight.pendingPatch),completed:cards.filter(c=>c.paid || c.ready).length};
   }
 
   function dayKey(time=Date.now()){
@@ -197,6 +199,37 @@
   }
   function daily(s,day=dayKey()){
     return boardFromRows(day,s.sessions.filter(r=>r.flight?.day===day));
+  }
+  function earlierRewards(s,today){
+    const days=new Set(s.sessions.filter(r=>r.flight?.pendingMissions?.length || r.flight?.pendingPatch).map(r=>r.flight.day));
+    days.delete(today);
+    if(!days.size)return [];
+    const rows=new Map([...days].map(day=>[day,[]]));
+    for(const r of s.sessions)rows.get(r.flight?.day)?.push(r);
+    return [...days].sort().reverse().map(day=>boardFromRows(day,rows.get(day)));
+  }
+  function claimReward(s,day,id){
+    const rows=s.sessions.filter(r=>r.flight?.day===day);
+    if(!rows.length)return 0;
+    const board=boardFromRows(day,rows);
+    let amount;
+    if(id==="patch"){
+      if(board.patch || !board.pendingPatch || !board.cards.every(c=>c.paid))return 0;
+      const flight=rows.find(r=>r.flight.pendingPatch).flight;
+      delete flight.pendingPatch;
+      flight.patch=true;
+      amount=patchCredits;
+    }else{
+      const card=board.cards.find(c=>c.id===id && c.ready);
+      if(!card)return 0;
+      const flight=rows.find(r=>r.flight.pendingMissions?.includes(id)).flight;
+      flight.pendingMissions=flight.pendingMissions.filter(key=>key!==id);
+      if(!flight.pendingMissions.length)delete flight.pendingMissions;
+      flight.missions.push(id);
+      amount=card.reward;
+    }
+    s.credits+=amount;
+    return amount;
   }
   function loadout(s){
     return {habitat:s.equipped.habitat,companion:s.equipped.companion,gear:s.equipped.gear??null};
@@ -238,8 +271,9 @@
     flight.survey=Math.floor(record.minutes/10)+flight.crewSurvey+flight.gearSurvey;
     record.flight=flight;
     const board=boardFromRows(day,[...previous,record]);
-    flight.missions=board.cards.filter(c=>!c.paid && c.progress===c.target).map(c=>c.id);
-    flight.patch=!board.patch && board.cards.every(c=>c.paid || c.progress===c.target);
+    const unlocked=board.cards.filter(c=>!c.paid && !c.ready && c.progress===c.target).map(c=>c.id);
+    if(unlocked.length)flight.pendingMissions=unlocked;
+    if(!board.patch && !board.pendingPatch && board.cards.every(c=>c.progress===c.target))flight.pendingPatch=true;
   }
   const missionCredits=flight=>total(earnedMissions(flight),c=>c.reward);
   const totalCredits=record=>record.earned+(record.flight?.gearCredits||0)+missionCredits(record.flight)+(record.flight?.patch?patchCredits:0);
@@ -268,7 +302,10 @@
     if(!Number.isFinite(stamp.getTime()) || dayKey(stamp)!==f.day)return false;
     if(f.missionSet!==undefined && f.missionSet!==2)return false;
     const valid=(f.missionSet===2?assignments(f.day):legacyBoard(f.day)).map(card=>card.id);
-    return f.missions.length<=3 && new Set(f.missions).size===f.missions.length && f.missions.every(id=>valid.includes(id));
+    if(f.pendingPatch!==undefined && (f.pendingPatch!==true || f.patch))return false;
+    if(f.pendingMissions!==undefined && !Array.isArray(f.pendingMissions))return false;
+    const all=[...f.missions,...(f.pendingMissions||[])];
+    return all.length<=3 && new Set(all).size===all.length && all.every(id=>valid.includes(id));
   }
-  globalThis.OrbitExpedition={items,item,perk,categoryNames,archive,stages:sharedStages,patchCredits,dayKey,daily,loadout,chart,missionCredits,totalCredits,worldId,survey,validFlight};
+  globalThis.OrbitExpedition={items,item,perk,categoryNames,archive,stages:sharedStages,patchCredits,dayKey,daily,earlierRewards,claimReward,loadout,chart,missionCredits,totalCredits,worldId,survey,validFlight};
 })();

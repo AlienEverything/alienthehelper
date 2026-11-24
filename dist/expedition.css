@@ -335,3 +335,11 @@
   .station-landmark[class*="landmark-tier-"] { left: 69%; bottom: calc(var(--ground) + 5%); }
   .room-landmark[class*="landmark-tier-"] { left: 52%; width: calc(var(--landmark-width) + 9%); height: calc(var(--landmark-height) / 2); bottom: calc(52% + var(--ground) / 2); }
 }
+
+.mission-ready { border-color: var(--accent); }
+.reward-claim { margin-top: 12px; min-height: 44px; gap: 7px; }
+.unclaimed-rewards { margin-top: 18px; }
+.earlier-day { margin-top: 14px; }
+.earlier-day h3 { font-size: .86rem; color: var(--muted); }
+.earlier-day>div { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.earlier-day .reward-claim { margin: 0; }

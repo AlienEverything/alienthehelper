@@ -24,7 +24,24 @@ test("three rotating missions, one payout per mission and one daily patch",()=>{
     assert.equal(M.settle(s,noon+4*3600000),false);
   }
   const board=E.daily(s,E.dayKey(noon));
-  assert.equal(board.cards.length,3);assert.equal(board.completed,3);assert.equal(board.patch,true);
+  assert.equal(board.cards.length,3);assert.equal(board.completed,3);assert.equal(board.patch,false);
+  const base=3*8+2*5,day=board.day;
+  assert.equal(s.credits,base);
+  assert.equal(E.claimReward(s,day,"patch"),0);
+  assert.equal(E.claimReward(s,day,"invalid"),0);
+  assert.equal(s.sessions.flatMap(r=>r.flight.pendingMissions||[]).length,3);
+  const restored=M.validateLive(JSON.parse(JSON.stringify(s)));
+  assert.deepEqual(E.earlierRewards(restored,"2026-11-21").map(b=>b.day),[day]);
+  for(const card of board.cards){
+    assert.equal(card.ready,true);assert.equal(card.paid,false);
+    assert.equal(E.claimReward(s,day,card.id),card.reward);
+    assert.equal(E.claimReward(s,day,card.id),0);
+  }
+  assert.equal(s.credits,base+18);
+  assert.equal(E.earlierRewards(s,"2026-11-21")[0].pendingPatch,true);
+  assert.equal(E.claimReward(s,day,"patch"),10);
+  assert.equal(E.claimReward(s,day,"patch"),0);
+  assert.deepEqual(E.earlierRewards(s,"2026-11-21"),[]);
   const paid=s.sessions.flatMap(r=>r.flight.missions);
   assert.equal(paid.length,3);assert.equal(new Set(paid).size,3);
   assert.equal(s.sessions.filter(r=>r.flight.patch).length,1);
@@ -138,6 +155,7 @@ test("the daily draw samples 61 distinct, tag-independent challenges and stays s
 test("paid legacy slots and the set bonus survive a mid-day update",()=>{
   const s=M.fresh(),start=new Date(2026,10,17,9).getTime();
   const old=study(s,start,45);
+  delete old.flight.pendingMissions;delete old.flight.pendingPatch;
   delete old.flight.crewRules;delete old.flight.missionSet;old.flight.missions=["subject"];old.flight.patch=false;
   s.credits=old.earned+4;
   assert.equal(E.missionCredits(old.flight),4);

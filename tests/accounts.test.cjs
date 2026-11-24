@@ -172,3 +172,28 @@ test("two offline completions for the same timer award one session without a con
   assert.equal(a.state.credits,b.state.credits);assert.equal(b.state.sessions.length,1);
   assert.equal(a.warning,"");assert.equal(b.warning,"");
 });
+
+test("concurrent claims from two devices pay each daily reward once and survive reload",async()=>{
+  const cloud=provider(),a=cloud.device("pilot-a").screen(),b=cloud.device("pilot-a").screen();
+  await a.boot();
+  const start=new Date(2026,10,20,9).getTime(),day=OrbitExpedition.dayKey(start);
+  await a.commit(s=>{
+    for(const [i,len] of [25,15,15,25,25].entries()){
+      s.result=null;s.settings.focus=len;M.start(s,start+i*3600000);M.settle(s,s.active.endsAt);
+    }
+    s.result=null;
+  });
+  await b.boot();
+  const before=a.state.credits,cards=OrbitExpedition.daily(a.state,day).cards;
+  assert.ok(cards.every(c=>c.ready));
+  for(const id of [...cards.map(c=>c.id),"patch"]){
+    a.dispatch("claim-reward",{day,id});b.dispatch("claim-reward",{day,id});
+    await Promise.all([a.flush(),b.flush()]);
+    await Promise.all([a.refresh(),b.refresh()]);
+  }
+  assert.equal(a.state.credits,before+28);
+  assert.equal(b.state.credits,before+28);
+  const fresh=cloud.device("pilot-a").screen();await fresh.boot();
+  const board=OrbitExpedition.daily(fresh.state,day);
+  assert.ok(board.patch && board.cards.every(c=>c.paid && !c.ready));
+});
