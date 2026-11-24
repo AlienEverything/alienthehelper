@@ -168,6 +168,25 @@
         if(!state.active && record)openDialog(F.starDetails(record));
         return;
       }
+      case "view-rewards":
+        if(state.result){pointTo("challenges");await change("back");}
+        return;
+      case "claim-reward":{
+        const [day,id]=value.split("/");
+        const board=E.daily(state,day);
+        const patch=id==="patch";
+        const amount=patch?(board.pendingPatch && board.cards.every(c=>c.paid)?E.patchCredits:0):board.cards.find(c=>c.id===id && c.ready)?.reward;
+        if(!amount)return;
+        await change("claim-reward",{day,id});
+        announce((patch?"Flight patch collected! ":"Reward claimed! ")+"+"+amount+" credits");
+        if(!reducedMotion.matches){
+          notice.animate?.([{opacity:0,scale:".94"},{opacity:1,scale:"1.04"},{opacity:1,scale:"1"}],{duration:330,easing:"ease-out"});
+          const reward=app.querySelector('[data-reward="'+CSS.escape(value)+'"]');
+          const badge=patch?reward:reward?.querySelector(".mission-icon");
+          badge?.animate?.([{transform:"scale(.92)"},{transform:"scale(1.18) rotate(-5deg)",filter:"brightness(1.4)"},{transform:"scale(1)"}],{duration:420,easing:"ease-out"});
+        }
+        return;
+      }
       case "open-patch":
         if(!state.active && state.sessions.some(r=>r.flight?.patch && r.flight.day===value))openDialog(F.patchDetails(state,value));
         return;

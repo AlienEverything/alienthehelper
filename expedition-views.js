@@ -15,23 +15,26 @@
     return `<div class="exp-links"><a href="#challenges">${icon("challenges",18)}<b>Daily challenges</b><span>${board.completed} / 3</span></a>
       <a href="#atlas">${icon("atlas",19)}<b>Star atlas</b><span>${plural(s.sessions.length,"star")}</span></a></div>`;
   }
-  function challengeCard(card,index){
+  function claimButton(day,id,label){
+    return `<button type="button" class="primary reward-claim" data-act="claim-reward" data-value="${esc(day)}/${esc(id)}">${coin}${esc(label)}</button>`;
+  }
+  function challengeCard(card,index,day){
     const colors=["aqua","lilac","peach"];
-    return `<article class="mission-card ${colors[index]} ${card.paid?"mission-paid":""}"><div class="mission-card-top"><span class="mission-icon">${icon(card.icon,22)}</span>${credit(card.reward,"credits")}</div>
-      <h2>${esc(card.name)}</h2><p>${esc(card.description)}</p><div class="mission-progress"><div><span>${card.paid?`${icon("check",14)}Reward earned`:"Progress"}</span><b>${card.progress} / ${card.target} ${card.unit}</b></div>
-      ${meter(card.progress,card.target,card.name)}</div></article>`;
+    return `<article data-reward="${esc(day)}/${esc(card.id)}" class="mission-card ${colors[index]} ${card.paid?"mission-paid":card.ready?"mission-ready":""}"><div class="mission-card-top"><span class="mission-icon">${icon(card.icon,22)}</span>${credit(card.reward,"credits")}</div>
+      <h2>${esc(card.name)}</h2><p>${esc(card.description)}</p><div class="mission-progress"><div><span>${card.paid?`${icon("check",14)}Reward claimed`:card.ready?"Ready to claim":"Progress"}</span><b>${card.progress} / ${card.target} ${card.unit}</b></div>
+      ${meter(card.progress,card.target,card.name)}${card.ready?claimButton(day,card.id,`Claim ${card.reward} credits`):""}</div></article>`;
   }
   function patchDays(s){
     return [...new Set(s.sessions.filter(r=>r.flight?.patch).map(r=>r.flight.day))].sort().reverse();
   }
   function challenges(s){
-    const board=E.daily(s), days=patchDays(s);
+    const board=E.daily(s), days=patchDays(s), earlier=E.earlierRewards(s,board.day);
     return `<section class="mission-banner ${board.patch?"awarded":""}"><div class="mission-copy"><span class="exp-eyebrow">${icon("calendar",14)}Daily set bonus</span>
-      <h2>Flight patch</h2><p>Finish all three challenges to collect today’s patch and <strong>${E.patchCredits} extra credits</strong>.</p>
-      <div class="mission-bonus-progress"><span class="mission-slots" aria-hidden="true">${board.cards.map(c=>`<i class="${c.paid?"filled":""}"></i>`).join("")}</span><b>${board.patch?"Patch earned":`${board.completed} of 3 complete`}</b></div></div>
-      <div class="patch-emblem" aria-hidden="true"><i></i><i></i>${img("mission-patch.png")}</div></section>
-      <div class="exp-section-head"><h2>Today’s challenges</h2><span>${icon("clock",14)}Resets at local midnight</span></div><div class="missions">${board.cards.map(challengeCard).join("")}</div>
-      <p class="mission-settle">${icon("check",15)}Credits are added automatically when your focus session ends.</p>
+      <h2>Flight patch</h2><p>Claim all three challenge rewards to unlock today’s patch and <strong>${E.patchCredits} extra credits</strong>.</p>
+      <div class="mission-bonus-progress"><span class="mission-slots" aria-hidden="true">${board.cards.map(c=>`<i class="${c.paid?"filled":""}"></i>`).join("")}</span><b>${board.patch?"Patch claimed":`${board.cards.filter(c=>c.paid).length} of 3 claimed`}</b></div>${board.pendingPatch && board.cards.every(c=>c.paid)?claimButton(board.day,"patch",`Claim patch + ${E.patchCredits} credits`):""}</div>
+      <div class="patch-emblem" data-reward="${esc(board.day)}/patch" aria-hidden="true"><i></i><i></i>${img("mission-patch.png")}</div></section>
+      <div class="exp-section-head"><h2>Today’s challenges</h2><span>${icon("clock",14)}Resets at local midnight</span></div><div class="missions">${board.cards.map((c,i)=>challengeCard(c,i,board.day)).join("")}</div>
+      ${earlier.length?`<section class="panel unclaimed-rewards"><h2>Unclaimed rewards</h2>${earlier.map(b=>`<div class="earlier-day"><h3>${esc(textDate(b.day))}</h3>${b.cards.filter(c=>c.ready).map(c=>`<div><span>${esc(c.name)}</span>${claimButton(b.day,c.id,`Claim ${c.reward} credits`)}</div>`).join("")}${b.pendingPatch && b.cards.every(c=>c.paid)?`<div><span>Daily flight patch</span>${claimButton(b.day,"patch",`Claim patch + ${E.patchCredits} credits`)}</div>`:""}</div>`).join("")}</section>`:""}
       ${days.length?`<section class="panel patch-shelf">${sectionHead("Patch log","challenges","peach")}<div class="patch-history">${days.slice(0,7).map(key=>`<button data-act="open-patch" data-value="${key}">${img("mission-patch.png")}<span>${esc(textDate(key))}</span></button>`).join("")}</div>${days.length>7?`<p class="field-help">Showing the latest seven of ${days.length} earned patches. Earlier patches are attached to their stars in the atlas.</p>`:""}</section>`:""}`;
   }
 
@@ -141,6 +144,7 @@
       ${focus?`<div class="result-credit">${coin}+${plural(E.totalCredits(r),"credit")}</div>`:""}${focus && f && (f.gearCredits||f.missions.length||f.patch)?creditRows(s,r):""}
       ${f?`<div class="chart-receipt">${icon("atlas",18)}<span>Star charted in <b>${world.name}</b>${f.survey?` · +${plural(f.survey,"survey point")}`:""}</span></div>${milestone}${f.patch?'<p class="patch-earned">Daily flight patch earned</p>':""}`:""}
       ${focus&&r.taskName?`<p class="result-task">${icon("tasks",16)}${esc(r.taskName)}</p>`:""}
+      ${f?.pendingMissions?.length?`<button class="secondary" data-act="view-rewards">${icon("challenges",16)}View challenge rewards</button>`:""}
       <div class="result-actions">${focus?`<button class="primary" data-act="take-break">${icon("cup",16)}Take a ${s.settings[next]} min break</button>`:""}<button class="${focus?"secondary":"primary"}" data-act="back-station">Back to station</button></div>
       ${focus?`<button class="text-btn view-star" data-act="view-result-star">${icon("atlas",15)}View this star</button>`:""}</section></main>`;
   }
